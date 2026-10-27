@@ -1,0 +1,46 @@
+#TODO: complete it in phase 14
+
+version: "0.1.0-phase1"
+
+layer_transfer_rules:
+  - targetLayerIndex: 0
+    detailLevel: "executive_high"
+    requiredFields:
+      - "key_achievements"
+      - "critical_risks"
+      - "unresolved_issues"
+      - "strategic_recommendations"
+    maxLength: 2000
+    minJudgeScore: 18
+
+  - targetLayerIndex: 1
+    detailLevel: "managerial"
+    requiredFields:
+      - "project_status"
+      - "issue_status"
+      - "research_gaps"
+      - "resource_needs"
+      - "rfp_status"
+    maxLength: 4000
+    minJudgeScore: 18
+
+  - targetLayerIndex: 2
+    detailLevel: "technical_summary"
+    requiredFields:
+      - "methods"
+      - "research_results"
+      - "limitations"
+      - "executor_capabilities"
+    maxLength: 8000
+    minJudgeScore: 18
+
+  - targetLayerIndex: 3
+    detailLevel: "technical_detailed"
+    requiredFields:
+      - "full_issue_details"
+      - "source_references"
+      - "sub_issue_status"
+      - "executor_mapping"
+      - "evidence"
+    maxLength: 20000
+    minJudgeScore: 18

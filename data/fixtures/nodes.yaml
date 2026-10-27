@@ -1,0 +1,130 @@
+# رجیستری اولیه گره‌های سازمانی (فاز ۱)
+# این فایل قابل ویرایش است و فهرست نهایی در مرحله تعریف مطالعه موردی تثبیت می‌شود.
+
+version: "0.1.0-phase1"
+last_updated: "2026-10-27"
+
+layers:
+  - layerIndex: 0
+    name: "لایه راهبردی"
+    description: "مرجع عالی تصمیم‌گیری یا مالک کلان ساختار سازمانی"
+    required: true
+  - layerIndex: 1
+    name: "سازمان‌های مادر"
+    description: "شرکت‌ها یا سازمان‌های اصلی"
+    required: true
+  - layerIndex: 2
+    name: "زیرمجموعه‌ها و واحدهای تخصصی"
+    description: "شرکت‌های تابعه، مراکز پژوهشی، واحدهای مهندسی"
+    required: true
+  - layerIndex: 3
+    name: "پروژه‌ها، تیم‌ها و گره‌های اجرایی"
+    description: "تیم‌های پروژه، واحدهای پیاده‌سازی، گروه‌های پژوهشی"
+    required: true
+  - layerIndex: 4
+    name: "منابع داخلی دانش"
+    description: "کتابخانه‌ها، آرشیوها، مخازن محلی"
+    required: false
+
+nodes:
+  - nodeId: "N-000"
+    name: "مرجع راهبردی نمونه"
+    layerIndex: 0
+    parentNodeId: null
+    activityDomain: "راهبری کلان"
+    boundaryType: "ROOT"
+    confidentiality: "internal"
+    reportingRules:
+      requiredSections:
+        - "executive_summary"
+        - "key_issues"
+        - "rfp_status"
+        - "research_gaps"
+      maxLength: 2000
+      detailLevel: "executive_high"
+
+  - nodeId: "N-100"
+    name: "سازمان مادر الف"
+    layerIndex: 1
+    parentNodeId: "N-000"
+    activityDomain: "فناوری اطلاعات"
+    boundaryType: "INTERMEDIATE"
+    confidentiality: "internal"
+    reportingRules:
+      requiredSections:
+        - "managerial_summary"
+        - "risks"
+        - "achievements"
+      maxLength: 4000
+      detailLevel: "managerial"
+
+  - nodeId: "N-200"
+    name: "مرکز پژوهشی ب"
+    layerIndex: 2
+    parentNodeId: "N-100"
+    activityDomain: "پژوهش نرم‌افزار"
+    boundaryType: "INTERMEDIATE"
+    confidentiality: "internal"
+    reportingRules:
+      requiredSections:
+        - "project_status"
+        - "issue_status"
+        - "research_gaps"
+        - "executor_capabilities"
+      maxLength: 8000
+      detailLevel: "technical_summary"
+
+  - nodeId: "N-300"
+    name: "تیم پروژه پ"
+    layerIndex: 3
+    parentNodeId: "N-200"
+    activityDomain: "پیاده‌سازی RAG"
+    boundaryType: "INTERMEDIATE"
+    confidentiality: "restricted"
+    reportingRules:
+      requiredSections:
+        - "issue_details"
+        - "source_references"
+        - "executor_mapping"
+        - "test_notes"
+      maxLength: 20000
+      detailLevel: "technical_detailed"
+
+  - nodeId: "N-301"
+    name: "تیم پژوهشی ت"
+    layerIndex: 3
+    parentNodeId: "N-200"
+    activityDomain: "پژوهش مدل کوچک"
+    boundaryType: "LEAF"
+    confidentiality: "restricted"
+    reportingRules:
+      requiredSections:
+        - "research_notes"
+      maxLength: 20000
+      detailLevel: "technical_detailed"
+
+  - nodeId: "N-400"
+    name: "آرشیو اسناد محلی"
+    layerIndex: 4
+    parentNodeId: "N-200"
+    activityDomain: "مخزن دانش"
+    boundaryType: "KNOWLEDGE_SOURCE"
+    confidentiality: "internal"
+    reportingRules:
+      requiredSections: []
+      maxLength: 0
+      detailLevel: null
+
+validation_rules:
+  - id: "R-01"
+    description: "هر گره دقیقاً یک لایه اصلی معتبر دارد"
+  - id: "R-02"
+    description: "هر گره (به‌جز ریشه) دقیقاً یک گره والد دارد"
+  - id: "R-03"
+    description: "گره والد باید در لایه بالاتر یا همان لایه با LayerIndex کوچکتر باشد"
+  - id: "R-04"
+    description: "گره Leaf نمی‌تواند فرزند داشته باشد"
+  - id: "R-05"
+    description: "حوزه فعالیت الزامی و غیرخالی است"
+  - id: "R-06"
+    description: "هر لایه (به‌جز لایه ۴) حداقل یک گره دارد"
