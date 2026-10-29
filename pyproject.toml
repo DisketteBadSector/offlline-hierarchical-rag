@@ -34,9 +34,14 @@ package-dir = {"" = "src"}
 where = ["src"]
 include = ["offline_rag*"]
 
+[tool.pyright]
+include = ["src", "tests", "scripts"]
+extraPaths = ["src"]
+pythonVersion = "3.10"
+
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 addopts = "-ra -q"
 
 [tool.ruff]

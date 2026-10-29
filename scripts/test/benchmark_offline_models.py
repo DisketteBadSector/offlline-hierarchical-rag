@@ -1,11 +1,14 @@
 """Comprehensive offline models benchmark script (Phase 2).
 
 Reads model registry settings from ``data/fixtures/models.yaml`` and benchmarks:
-1. LLM (role='llm'): connectivity, TTFT (ms), token speed (tok/s), and structured JSON stability.
+1. LLM (role='llm'): connectivity, TTFT (ms), token speed (tok/s), structured JSON stability,
+   and per-run generation metrics via the assembled PRM-QA prompt.
 2. Embedding (role='embedding'): vector generation, dimensionality verification, and cosine similarity sanity check.
 3. LVM (role='lvm'): document layout description and structured table/section extraction.
 
 Supports automatic graceful fallback when the local inference server is not running.
+This script supersedes the former ``test_llm.py`` and is the single entry point for
+LLM diagnostics (use ``--llm-only`` for a lightweight LLM-only run).
 """
 
 from __future__ import annotations
@@ -20,18 +23,17 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT / "scripts" / "test") not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "scripts" / "test"))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-from test_llm import (  # noqa: E402
+from scripts.test._common import (  # noqa: E402
+    DEFAULT_MODELS_YAML,
     DEFAULT_PROMPTS_YAML,
     _http_get_json,
     _http_post_json,
     build_prompt_assembler,
     load_yaml_file,
 )
-
-DEFAULT_MODELS_YAML = REPO_ROOT / "data" / "fixtures" / "models.yaml"
 
 REQUIRED_MODEL_FIELDS = {
     "modelId",
@@ -72,6 +74,12 @@ def load_and_validate_models_registry(config_path: Path = DEFAULT_MODELS_YAML) -
     return by_role
 
 
+def load_llm_config(config_path: Path = DEFAULT_MODELS_YAML) -> dict[str, Any]:
+    """Load the LLM model configuration entry from models.yaml."""
+    by_role = load_and_validate_models_registry(config_path)
+    return by_role["llm"]
+
+
 def check_endpoint_alive(endpoint: str, timeout: float = 2.5) -> tuple[bool, list[str]]:
     """Check if an OpenAI-compatible local server is reachable and return available model IDs."""
     try:
@@ -80,6 +88,20 @@ def check_endpoint_alive(endpoint: str, timeout: float = 2.5) -> tuple[bool, lis
         return True, model_ids
     except Exception:
         return False, []
+
+
+def resolve_active_model_name(
+    endpoint: str, configured_model_id: str, timeout: float = 2.5
+) -> tuple[str, bool]:
+    """Check local server connectivity and return (active_model_id, is_live)."""
+    is_alive, model_ids = check_endpoint_alive(endpoint, timeout=timeout)
+    if not is_alive:
+        return configured_model_id, False
+    if not model_ids:
+        return configured_model_id, True
+    if configured_model_id in model_ids:
+        return configured_model_id, True
+    return model_ids[0], True
 
 
 def _deterministic_embedding(text: str, dim: int = 1024) -> list[float]:
@@ -167,7 +189,159 @@ def benchmark_embedding_model(cfg: dict[str, Any], force_fallback: bool = False)
     }
 
 
-def benchmark_llm_model(cfg: dict[str, Any], runs: int = 3, force_fallback: bool = False) -> dict[str, Any]:
+def measure_generation_run(
+    endpoint: str,
+    model_name: str,
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    is_live: bool,
+    system_prompt: str = "",
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """Measure TTFT (ms) and generation speed (tok/s) for a single LLM run."""
+    if not is_live:
+        start = time.perf_counter()
+        simulated_text = json.dumps(
+            {
+                "answer": (
+                    "مدیریت دانش سازمانی در ساختار سلسله‌مراتبی آفلاین موجب حفظ تجربیات فنی، "
+                    "ردیابی مسائل کلیدی و انتقال خلاصه‌های تصمیم‌ساز به لایه‌های مدیریتی می‌شود."
+                ),
+                "source_references": ["DOC-N300-01#p1"],
+                "uncertainty_declared": False,
+            },
+            ensure_ascii=False,
+        )
+        ttft_ms = 42.5
+        elapsed = max(time.perf_counter() - start, 0.05)
+        token_count = 36
+        return {
+            "mode": "offline_fallback",
+            "ttft_ms": ttft_ms,
+            "completion_tokens": token_count,
+            "elapsed_s": round(elapsed, 4),
+            "tok_per_s": round(token_count / 1.2, 2),
+            "content": simulated_text,
+        }
+
+    url = f"{endpoint.rstrip('/')}/chat/completions"
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+    payload = {
+        "model": model_name,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": False,
+    }
+
+    start_ns = time.perf_counter()
+    body = _http_post_json(url, payload, timeout=timeout)
+    elapsed = max(time.perf_counter() - start_ns, 1e-6)
+    content = body["choices"][0]["message"]["content"]
+    tokens = body.get("usage", {}).get("completion_tokens") or max(len(content.split()), 1)
+    return {
+        "mode": "live_server",
+        "ttft_ms": round(elapsed * 220.0, 2),
+        "completion_tokens": int(tokens),
+        "elapsed_s": round(elapsed, 4),
+        "tok_per_s": round(int(tokens) / elapsed, 2),
+        "content": content,
+    }
+
+
+def test_structured_json_stability(
+    endpoint: str,
+    model_name: str,
+    temperature: float,
+    is_live: bool,
+    runs: int = 3,
+    timeout: float = 30.0,
+    prompts_path: Path = DEFAULT_PROMPTS_YAML,
+    prompt_version: str = "1.0.0",
+) -> dict[str, Any]:
+    """Test LLM structured JSON output stability using versioned prompt from data/prompts/knowledge_transfer.yaml."""
+    assembler = build_prompt_assembler(prompts_path)
+    assembled = assembler.assemble(
+        prompt_id="PRM-TRANSFER-PREP",
+        version=prompt_version,
+        variables={
+            "node_id": "N-300",
+            "detail_level": "technical_summary",
+            "required_fields": "node_id, detail_level, key_achievements, unresolved_issues, source_references",
+            "draft_payload": "[DOC-N300-01#p2] پیاده‌سازی خط لوله خردسازی اسناد؛ چالش باز: تنظیم آستانه هم‌پوشانی.",
+        },
+    )
+    required_keys = set(assembled.expected_output_format.required_keys)
+
+    valid_runs = 0
+    schema_compliant_runs = 0
+    samples: list[dict[str, Any]] = []
+
+    for _ in range(runs):
+        if not is_live:
+            raw_output = json.dumps(
+                {
+                    "node_id": "N-300",
+                    "detail_level": "technical_summary",
+                    "key_achievements": ["پیاده‌سازی اولیه خط لوله خردسازی اسناد"],
+                    "unresolved_issues": ["تنظیم نهایی آستانه تشخیص هم‌پوشانی معنایی"],
+                    "source_references": ["DOC-N300-01#p2"],
+                },
+                ensure_ascii=False,
+            )
+        else:
+            try:
+                body = _http_post_json(
+                    f"{endpoint.rstrip('/')}/chat/completions",
+                    {
+                        "model": model_name,
+                        "messages": assembled.to_messages(),
+                        "max_tokens": 300,
+                        "temperature": temperature,
+                    },
+                    timeout=timeout,
+                )
+                raw_output = body["choices"][0]["message"]["content"].strip()
+            except Exception as exc:
+                raw_output = f"ERROR: {exc}"
+
+        cleaned = raw_output.strip()
+        if cleaned.startswith("```"):
+            lines = [ln for ln in cleaned.splitlines() if not ln.strip().startswith("```")]
+            cleaned = "\n".join(lines).strip()
+
+        try:
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, dict):
+                valid_runs += 1
+                if required_keys.issubset(parsed.keys()):
+                    schema_compliant_runs += 1
+                samples.append(parsed)
+        except Exception:
+            continue
+
+    return {
+        "prompt_id": assembled.prompt_id,
+        "prompt_version": str(assembled.version),
+        "total_runs": runs,
+        "valid_json_runs": valid_runs,
+        "schema_compliant_runs": schema_compliant_runs,
+        "stability_rate": round(schema_compliant_runs / max(runs, 1), 2),
+        "sample_output": samples[0] if samples else None,
+    }
+
+
+def benchmark_llm_model(
+    cfg: dict[str, Any],
+    runs: int = 3,
+    force_fallback: bool = False,
+    prompts_path: Path = DEFAULT_PROMPTS_YAML,
+    prompt_version: str = "1.0.0",
+) -> dict[str, Any]:
     """Benchmark LLM connectivity, TTFT, tok/s, and structured JSON output stability."""
     endpoint = str(cfg["providerEndpoint"])
     model_id = str(cfg["modelId"])
@@ -183,10 +357,10 @@ def benchmark_llm_model(cfg: dict[str, Any], runs: int = 3, force_fallback: bool
     schema_valid_count = 0
     mode = "offline_fallback"
 
-    assembler = build_prompt_assembler(DEFAULT_PROMPTS_YAML)
+    assembler = build_prompt_assembler(prompts_path)
     assembled_judge = assembler.assemble(
         prompt_id="PRM-JUDGE",
-        version="1.0.0",
+        version=prompt_version,
         variables={
             "source_knowledge": "[DOC-01#p1] پروژه الف نمایه‌سازی اسناد DOCX را تکمیل کرد.",
             "request_or_rule": "technical_summary",
@@ -194,38 +368,50 @@ def benchmark_llm_model(cfg: dict[str, Any], runs: int = 3, force_fallback: bool
             "threshold": "18",
         },
     )
-    required_keys = {
-        "score",
-        "passed",
-        "explanation",
-        "missing_information",
-        "unsupported_claims",
-    }
-    system_prompt = assembled_judge.system_message
-    user_prompt = assembled_judge.user_message
+    required_keys = set(assembled_judge.expected_output_format.required_keys)
 
+    # 1. Per-run generation metrics via PRM-QA (replaces former test_llm.py measure_generation_run loop)
+    qa_prompt = assembler.assemble(
+        prompt_id="PRM-QA",
+        version=prompt_version,
+        variables={
+            "node_scope": "N-300",
+            "context": "[DOC-N300-01#p1] مدیریت دانش در گره‌های سلسله‌مراتبی آفلاین با حفظ منبع انجام می‌شود.",
+            "query": "نقش مدیریت دانش سازمانی در ساختار سلسله‌مراتبی آفلاین چیست؟",
+        },
+    )
+    run_metrics: list[dict[str, Any]] = []
+    for _ in range(runs):
+        metrics = measure_generation_run(
+            endpoint=endpoint,
+            model_name=target_model,
+            prompt=qa_prompt.user_message,
+            system_prompt=qa_prompt.system_message,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            is_live=is_alive,
+        )
+        run_metrics.append(metrics)
+        ttft_values.append(metrics["ttft_ms"])
+        tok_s_values.append(metrics["tok_per_s"])
+        if metrics["mode"] == "live_server":
+            mode = "live_server"
+
+    # 2. Structured JSON stability using PRM-JUDGE
     for _ in range(runs):
         if is_alive:
             try:
-                t0 = time.perf_counter()
-                payload = _http_post_json(
+                body = _http_post_json(
                     f"{endpoint.rstrip('/')}/chat/completions",
                     {
                         "model": target_model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
+                        "messages": assembled_judge.to_messages(),
                         "max_tokens": max_tokens,
                         "temperature": temperature,
                     },
                     timeout=30.0,
                 )
-                elapsed = max(time.perf_counter() - t0, 1e-6)
-                raw_text = payload["choices"][0]["message"]["content"].strip()
-                tokens = int(payload.get("usage", {}).get("completion_tokens") or max(len(raw_text.split()), 1))
-                ttft_values.append(round(elapsed * 220.0, 2))
-                tok_s_values.append(round(tokens / elapsed, 2))
+                raw_text = body["choices"][0]["message"]["content"].strip()
                 mode = "live_server"
             except Exception:
                 raw_text = ""
@@ -234,8 +420,6 @@ def benchmark_llm_model(cfg: dict[str, Any], runs: int = 3, force_fallback: bool
 
         if not raw_text:
             mode = "offline_fallback"
-            ttft_values.append(38.0)
-            tok_s_values.append(28.5)
             raw_text = json.dumps(
                 {
                     "score": 19,
@@ -262,6 +446,17 @@ def benchmark_llm_model(cfg: dict[str, Any], runs: int = 3, force_fallback: bool
         except Exception:
             pass
 
+    # 3. Additional JSON stability check via PRM-TRANSFER-PREP (carried over from former test_llm.py)
+    transfer_stability = test_structured_json_stability(
+        endpoint=endpoint,
+        model_name=target_model,
+        temperature=temperature,
+        is_live=is_alive,
+        runs=runs,
+        prompts_path=prompts_path,
+        prompt_version=prompt_version,
+    )
+
     avg_ttft = round(sum(ttft_values) / max(len(ttft_values), 1), 2)
     avg_tok_s = round(sum(tok_s_values) / max(len(tok_s_values), 1), 2)
 
@@ -275,10 +470,17 @@ def benchmark_llm_model(cfg: dict[str, Any], runs: int = 3, force_fallback: bool
         "validJsonRuns": json_valid_count,
         "schemaCompliantRuns": schema_valid_count,
         "jsonStabilityRate": round(schema_valid_count / max(runs, 1), 2),
+        "runMetrics": run_metrics,
+        "transferPrepJsonStability": transfer_stability,
     }
 
 
-def benchmark_lvm_model(cfg: dict[str, Any], force_fallback: bool = False) -> dict[str, Any]:
+def benchmark_lvm_model(
+    cfg: dict[str, Any],
+    force_fallback: bool = False,
+    prompts_path: Path = DEFAULT_PROMPTS_YAML,
+    prompt_version: str = "1.0.0",
+) -> dict[str, Any]:
     """Benchmark LVM document layout description and structured extraction with offline fallback."""
     endpoint = str(cfg["providerEndpoint"])
     model_id = str(cfg["modelId"])
@@ -293,10 +495,10 @@ def benchmark_lvm_model(cfg: dict[str, Any], force_fallback: bool = False) -> di
 
     if is_alive and target_model:
         try:
-            assembler = build_prompt_assembler(DEFAULT_PROMPTS_YAML)
+            assembler = build_prompt_assembler(prompts_path)
             assembled_lvm = assembler.assemble(
                 prompt_id="PRM-TECH-SUM",
-                version="1.0.0",
+                version=prompt_version,
                 variables={
                     "node_id": "N-301",
                     "detail_level": "technical_detailed",
@@ -349,17 +551,53 @@ def benchmark_lvm_model(cfg: dict[str, Any], force_fallback: bool = False) -> di
     }
 
 
+def run_llm_only_benchmark(
+    config_path: Path = DEFAULT_MODELS_YAML,
+    runs: int = 3,
+    force_fallback: bool = False,
+    prompts_path: Path = DEFAULT_PROMPTS_YAML,
+    prompt_version: str = "1.0.0",
+) -> dict[str, Any]:
+    """Lightweight LLM-only benchmark (replaces the former test_llm.py CLI)."""
+    llm_cfg = load_llm_config(config_path)
+    report = benchmark_llm_model(
+        llm_cfg,
+        runs=runs,
+        force_fallback=force_fallback,
+        prompts_path=prompts_path,
+        prompt_version=prompt_version,
+    )
+    return {
+        "registryPath": str(config_path),
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "results": {"llm": report},
+    }
+
+
 def run_all_benchmarks(
     config_path: Path = DEFAULT_MODELS_YAML,
     runs: int = 3,
     force_fallback: bool = False,
+    prompts_path: Path = DEFAULT_PROMPTS_YAML,
+    prompt_version: str = "1.0.0",
 ) -> dict[str, Any]:
     """Load registry and execute benchmarks for embedding, llm, and lvm."""
     by_role = load_and_validate_models_registry(config_path)
 
     embedding_report = benchmark_embedding_model(by_role["embedding"], force_fallback=force_fallback)
-    llm_report = benchmark_llm_model(by_role["llm"], runs=runs, force_fallback=force_fallback)
-    lvm_report = benchmark_lvm_model(by_role["lvm"], force_fallback=force_fallback)
+    llm_report = benchmark_llm_model(
+        by_role["llm"],
+        runs=runs,
+        force_fallback=force_fallback,
+        prompts_path=prompts_path,
+        prompt_version=prompt_version,
+    )
+    lvm_report = benchmark_lvm_model(
+        by_role["lvm"],
+        force_fallback=force_fallback,
+        prompts_path=prompts_path,
+        prompt_version=prompt_version,
+    )
 
     return {
         "registryPath": str(config_path),
@@ -372,9 +610,29 @@ def run_all_benchmarks(
     }
 
 
+def _print_llm_report(llm: dict[str, Any]) -> None:
+    print(
+        f"[2] LLM       ({llm['modelId']}) | mode={llm['mode']} | "
+        f"avg_TTFT={llm['avgTtftMs']} ms | speed={llm['avgTokensPerSec']} tok/s | "
+        f"JSON_stability={llm['jsonStabilityRate'] * 100:.0f}% "
+        f"({llm['schemaCompliantRuns']}/{llm['runs']})"
+    )
+    transfer = llm.get("transferPrepJsonStability", {})
+    if transfer:
+        print(
+            f"    └─ PRM-TRANSFER-PREP JSON stability: "
+            f"valid={transfer['valid_json_runs']}/{transfer['total_runs']} | "
+            f"schema_compliant={transfer['schema_compliant_runs']}/{transfer['total_runs']} | "
+            f"rate={transfer['stability_rate'] * 100:.0f}%"
+        )
+    if llm.get("runMetrics"):
+        print("    └─ Sample generation output (last run):")
+        print(f"       {llm['runMetrics'][-1]['content']}")
+
+
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore
 
     parser = argparse.ArgumentParser(description="Benchmark offline Embedding, LLM, and LVM models.")
     parser.add_argument(
@@ -383,45 +641,73 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_MODELS_YAML,
         help="Path to data/fixtures/models.yaml",
     )
+    parser.add_argument(
+        "--prompts",
+        type=Path,
+        default=DEFAULT_PROMPTS_YAML,
+        help="Path to data/prompts/ directory (or a single prompt YAML file)",
+    )
+    parser.add_argument(
+        "--prompt-version",
+        type=str,
+        default="1.0.0",
+        help="Explicit prompt version to assemble from data/prompts/",
+    )
     parser.add_argument("--runs", type=int, default=3, help="Number of LLM benchmark iterations")
     parser.add_argument(
         "--offline-fallback",
         action="store_true",
         help="Force deterministic offline fallback without network calls",
     )
+    parser.add_argument(
+        "--llm-only",
+        action="store_true",
+        help="Run only the LLM benchmark (replaces the former test_llm.py CLI)",
+    )
     parser.add_argument("--output-json", type=Path, default=None, help="Optional path to save JSON report")
     args = parser.parse_args(argv)
 
-    summary = run_all_benchmarks(
-        config_path=args.config,
-        runs=args.runs,
-        force_fallback=args.offline_fallback,
-    )
+    if args.llm_only:
+        summary = run_llm_only_benchmark(
+            config_path=args.config,
+            runs=args.runs,
+            force_fallback=args.offline_fallback,
+            prompts_path=args.prompts,
+            prompt_version=args.prompt_version,
+        )
+        print("=" * 78)
+        print("OFFLINE HIERARCHICAL RAG - LLM-ONLY BENCHMARK REPORT")
+        print("=" * 78)
+        _print_llm_report(summary["results"]["llm"])
+        print("=" * 78)
+    else:
+        summary = run_all_benchmarks(
+            config_path=args.config,
+            runs=args.runs,
+            force_fallback=args.offline_fallback,
+            prompts_path=args.prompts,
+            prompt_version=args.prompt_version,
+        )
+        emb = summary["results"]["embedding"]
+        llm = summary["results"]["llm"]
+        lvm = summary["results"]["lvm"]
 
-    emb = summary["results"]["embedding"]
-    llm = summary["results"]["llm"]
-    lvm = summary["results"]["lvm"]
-
-    print("=" * 78)
-    print("OFFLINE HIERARCHICAL RAG - PHASE 2 MODEL BENCHMARK REPORT")
-    print("=" * 78)
-    print(
-        f"[1] Embedding ({emb['modelId']}) | mode={emb['mode']} | "
-        f"dim={emb['vectorDimension']} | speed={emb['throughputTextsPerSec']} texts/s | "
-        f"sim_related={emb['relatedPairCosineSimilarity']} > sim_unrelated={emb['unrelatedPairCosineSimilarity']} "
-        f"(passed={emb['semanticDiscriminationPassed']})"
-    )
-    print(
-        f"[2] LLM       ({llm['modelId']}) | mode={llm['mode']} | "
-        f"avg_TTFT={llm['avgTtftMs']} ms | speed={llm['avgTokensPerSec']} tok/s | "
-        f"JSON_stability={llm['jsonStabilityRate'] * 100:.0f}% ({llm['schemaCompliantRuns']}/{llm['runs']})"
-    )
-    print(
-        f"[3] LVM       ({lvm['modelId']}) | mode={lvm['mode']} | "
-        f"latency={lvm['latencyMs']} ms | layout_valid={lvm['layoutSchemaValid']} | "
-        f"elements={lvm['detectedElementsCount']} | tables={lvm['tablesDetected']}"
-    )
-    print("=" * 78)
+        print("=" * 78)
+        print("OFFLINE HIERARCHICAL RAG - PHASE 2 MODEL BENCHMARK REPORT")
+        print("=" * 78)
+        print(
+            f"[1] Embedding ({emb['modelId']}) | mode={emb['mode']} | "
+            f"dim={emb['vectorDimension']} | speed={emb['throughputTextsPerSec']} texts/s | "
+            f"sim_related={emb['relatedPairCosineSimilarity']} > sim_unrelated={emb['unrelatedPairCosineSimilarity']} "
+            f"(passed={emb['semanticDiscriminationPassed']})"
+        )
+        _print_llm_report(llm)
+        print(
+            f"[3] LVM       ({lvm['modelId']}) | mode={lvm['mode']} | "
+            f"latency={lvm['latencyMs']} ms | layout_valid={lvm['layoutSchemaValid']} | "
+            f"elements={lvm['detectedElementsCount']} | tables={lvm['tablesDetected']}"
+        )
+        print("=" * 78)
 
     if args.output_json:
         args.output_json.parent.mkdir(parents=True, exist_ok=True)

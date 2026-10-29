@@ -6,15 +6,16 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT / "scripts" / "test") not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "scripts" / "test"))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-from benchmark_offline_models import (  # noqa: E402
+from scripts.test._common import load_yaml_file  # noqa: E402
+from scripts.test.benchmark_offline_models import (  # noqa: E402
     REQUIRED_MODEL_FIELDS,
     load_and_validate_models_registry,
     run_all_benchmarks,
+    run_llm_only_benchmark,
 )
-from test_llm import load_yaml_file  # noqa: E402
 
 
 def test_layers_yaml_resolves_layer3_usage_scope() -> None:
@@ -71,3 +72,23 @@ def test_benchmark_offline_models_runs_in_fallback_mode() -> None:
     assert results["embedding"]["semanticDiscriminationPassed"] is True
     assert results["llm"]["jsonStabilityRate"] == 1.0
     assert results["lvm"]["layoutSchemaValid"] is True
+    # Carried over from former test_llm.py: PRM-TRANSFER-PREP JSON stability
+    transfer = results["llm"]["transferPrepJsonStability"]
+    assert transfer["valid_json_runs"] == 2
+    assert transfer["schema_compliant_runs"] == 2
+    assert transfer["stability_rate"] == 1.0
+
+
+def test_llm_only_benchmark_runs_in_fallback_mode() -> None:
+    """Verify --llm-only replacement path works with deterministic offline fallback."""
+    report = run_llm_only_benchmark(
+        config_path=REPO_ROOT / "data" / "fixtures" / "models.yaml",
+        runs=2,
+        force_fallback=True,
+    )
+    llm = report["results"]["llm"]
+    assert llm["modelId"] == "diba-base"
+    assert llm["mode"] == "offline_fallback"
+    assert llm["runs"] == 2
+    assert len(llm["runMetrics"]) == 2
+    assert llm["jsonStabilityRate"] == 1.0
