@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    import requests as _requests  # type: ignore[import-not-found]
+    import requests as _requests
 except ImportError:
     _requests = None
 

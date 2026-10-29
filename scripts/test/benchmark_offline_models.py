@@ -6,7 +6,9 @@ Reads model registry settings from ``data/fixtures/models.yaml`` and benchmarks:
 2. Embedding (role='embedding'): vector generation, dimensionality verification, and cosine similarity sanity check.
 3. LVM (role='lvm'): document layout description and structured table/section extraction.
 
-Supports automatic graceful fallback when the local inference server is not running.
+By default the script FAILS FAST when the local inference server is unreachable, so that
+fabricated numbers are never emitted. Pass ``--offline-fallback`` to explicitly acknowledge
+deterministic stub output (useful for CI and smoke tests without a server).
 This script supersedes the former ``test_llm.py`` and is the single entry point for
 LLM diagnostics (use ``--llm-only`` for a lightweight LLM-only run).
 """
@@ -88,6 +90,33 @@ def check_endpoint_alive(endpoint: str, timeout: float = 2.5) -> tuple[bool, lis
         return True, model_ids
     except Exception:
         return False, []
+
+
+def require_live_server_or_fail(
+    by_role: dict[str, dict[str, Any]],
+    force_fallback: bool,
+) -> None:
+    """Fail fast when the local server is unreachable and fallback was not explicitly requested.
+
+    Prevents misleading benchmark numbers: if the server is down, the user must either
+    start it or explicitly pass ``--offline-fallback`` to acknowledge deterministic stubs.
+    """
+    if force_fallback:
+        return
+
+    endpoints = sorted({str(cfg["providerEndpoint"]).rstrip("/") for cfg in by_role.values()})
+    unreachable = [ep for ep in endpoints if not check_endpoint_alive(ep)[0]]
+    if unreachable:
+        lines = [
+            "ERROR: Local offline inference server is not reachable.",
+            f"  Unreachable endpoint(s): {', '.join(unreachable)}",
+            "",
+            "Refusing to emit fabricated benchmark numbers.",
+            "Options:",
+            "  1) Start the local OpenAI-compatible server (see data/fixtures/models.yaml).",
+            "  2) Re-run with --offline-fallback to acknowledge deterministic stub output.",
+        ]
+        raise SystemExit("\n".join(lines))
 
 
 def resolve_active_model_name(
@@ -560,6 +589,7 @@ def run_llm_only_benchmark(
 ) -> dict[str, Any]:
     """Lightweight LLM-only benchmark (replaces the former test_llm.py CLI)."""
     llm_cfg = load_llm_config(config_path)
+    require_live_server_or_fail({"llm": llm_cfg}, force_fallback=force_fallback)
     report = benchmark_llm_model(
         llm_cfg,
         runs=runs,
@@ -583,6 +613,7 @@ def run_all_benchmarks(
 ) -> dict[str, Any]:
     """Load registry and execute benchmarks for embedding, llm, and lvm."""
     by_role = load_and_validate_models_registry(config_path)
+    require_live_server_or_fail(by_role, force_fallback=force_fallback)
 
     embedding_report = benchmark_embedding_model(by_role["embedding"], force_fallback=force_fallback)
     llm_report = benchmark_llm_model(
@@ -657,7 +688,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--offline-fallback",
         action="store_true",
-        help="Force deterministic offline fallback without network calls",
+        help=(
+            "Explicitly allow deterministic stub output when the local server is down. "
+            "Without this flag, the script fails fast instead of emitting fabricated numbers."
+        ),
     )
     parser.add_argument(
         "--llm-only",
