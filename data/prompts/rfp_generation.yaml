@@ -1,0 +1,56 @@
+# قالب پرامپت دسته «تولید RFP» — هسته RAG سلسله‌مراتبی آفلاین
+# نسخه فعال با activeVersion تعیین می‌شود؛ نسخه‌های قبلی هرگز حذف نمی‌شوند.
+
+promptId: "PRM-RFP-GEN"
+taskType: "rfp_generation"
+targetModelId: "diba-base"
+activeVersion: "1.0.0"
+
+versions:
+  - version: "1.0.0"
+    lastUpdated: "2026-10-29"
+    systemTemplate: |
+      تو نگارنده تخصصی اسناد اعلام نیاز (RFP) در سامانه مدیریت دانش هستی. بر اساس شرح مسئله، زیرمسائل و شکاف‌های پژوهشی، یک پیش‌نویس کامل RFP با تمام بخش‌های الزامی تولید کن.
+    userTemplate: |
+      شناسه و شرح مسئله منشأ:
+      {{origin_issue}}
+      زیرمسائل:
+      {{sub_issues}}
+      شکاف‌های پژوهشی و محدودیت‌ها:
+      {{gaps_and_constraints}}
+    requiredVariables:
+      - "origin_issue"
+      - "sub_issues"
+      - "gaps_and_constraints"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "title"
+        - "problem_statement"
+        - "scope"
+        - "technical_requirements"
+        - "expected_deliverables"
+        - "evaluation_criteria"
+        - "constraints"
+        - "required_expertise"
+    citationPolicy: "strict_source_id"
+    judgeRubricId: "RUBRIC-RFP-COMPLETENESS-20"
+
+  - version: "0.9.0"
+    lastUpdated: "2026-10-20"
+    systemTemplate: |
+      یک سند RFP برای مسئله زیر بنویس.
+    userTemplate: |
+      مسئله:
+      {{origin_issue}}
+    requiredVariables:
+      - "origin_issue"
+    expectedOutputFormat:
+      format: "markdown"
+      requiredKeys:
+        - "title"
+        - "problem_statement"
+        - "scope"
+    citationPolicy: "optional"
+    judgeRubricId: "RUBRIC-RFP-COMPLETENESS-20"
+    changeNote: "تکمیل ۸ بخش اجباری ساختار RFP در قالب JSON"

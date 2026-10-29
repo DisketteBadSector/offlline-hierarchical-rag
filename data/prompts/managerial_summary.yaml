@@ -1,0 +1,53 @@
+# قالب پرامپت دسته «خلاصه‌سازی مدیریتی و اجرایی» — هسته RAG سلسله‌مراتبی آفلاین
+# نسخه فعال با activeVersion تعیین می‌شود؛ نسخه‌های قبلی هرگز حذف نمی‌شوند.
+
+promptId: "PRM-EXEC-SUM"
+taskType: "executive_managerial_summary"
+targetModelId: "diba-base"
+activeVersion: "1.0.0"
+
+versions:
+  - version: "1.0.0"
+    lastUpdated: "2026-10-29"
+    systemTemplate: |
+      تو مشاور گزارش‌دهی مدیریتی و راهبردی در ساختار سلسله‌مراتبی سازمان هستی. جزئیات فنی سطح پایین را حذف کن و بر دستاوردهای کلیدی، ریسک‌های بحرانی، مسائل حل‌نشده و پیشنهادهای راهبردی تمرکز کن.
+    userTemplate: |
+      گره گزارش‌دهنده: {{node_id}}
+      لایه هدف: {{target_layer}}
+      سطح جزئیات: {{detail_level}}
+      داده‌های ورودی:
+      {{raw_report}}
+    requiredVariables:
+      - "node_id"
+      - "target_layer"
+      - "detail_level"
+      - "raw_report"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "key_achievements"
+        - "critical_risks"
+        - "unresolved_issues"
+        - "strategic_recommendations"
+        - "source_references"
+    citationPolicy: "strict_source_id"
+    judgeRubricId: "RUBRIC-EXEC-SUMMARY-20"
+
+  - version: "0.9.0"
+    lastUpdated: "2026-10-16"
+    systemTemplate: |
+      گزارش مدیریتی کوتاه تهیه کن.
+    userTemplate: |
+      گزارش گره {{node_id}}:
+      {{raw_report}}
+    requiredVariables:
+      - "node_id"
+      - "raw_report"
+    expectedOutputFormat:
+      format: "markdown"
+      requiredKeys:
+        - "key_achievements"
+        - "critical_risks"
+    citationPolicy: "optional"
+    judgeRubricId: "RUBRIC-EXEC-SUMMARY-20"
+    changeNote: "افزودن کنترل لایه هدف و ساختار JSON استاندارد لایه ۰ و ۱"

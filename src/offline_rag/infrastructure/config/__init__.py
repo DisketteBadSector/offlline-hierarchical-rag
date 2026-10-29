@@ -1,8 +1,9 @@
-"""Configuration and YAML Fixture Loader for layers.yaml, nodes.yaml, models.yaml, and prompt_registry.yaml."""
+"""Configuration and YAML Fixture Loader for layers.yaml, nodes.yaml, models.yaml, and per-category prompt files in data/prompts/."""
 
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -184,6 +185,51 @@ def _parse_yaml_block(
     return result_dict, idx
 
 
+def _fold_block_scalars(raw_lines: list[str]) -> list[str]:
+    """Convert YAML literal/folded block scalars (``key: |`` / ``|-`` / ``>``) into single-line quoted scalars."""
+    out: list[str] = []
+    idx = 0
+    while idx < len(raw_lines):
+        line = raw_lines[idx]
+        stripped = _strip_yaml_comment(line)
+        indicator = stripped.rstrip()[-2:].strip() if stripped.rstrip() else ""
+        is_block = stripped.rstrip().endswith((": |", ": |-", ": >", ": >-")) or (
+            stripped.lstrip().startswith("- ") and indicator in ("|", "|-")
+            and stripped.rstrip().endswith((": |", ": |-"))
+        )
+        if not is_block:
+            out.append(line)
+            idx += 1
+            continue
+        head = stripped.rstrip()
+        style = head.rsplit(":", 1)[1].strip()
+        key_part = head.rsplit(":", 1)[0]
+        base_indent = len(head) - len(head.lstrip(" "))
+        if head.lstrip().startswith("- "):
+            base_indent += 2
+        idx += 1
+        body: list[str] = []
+        while idx < len(raw_lines):
+            nxt = raw_lines[idx]
+            if nxt.strip() and (len(nxt) - len(nxt.lstrip(" "))) <= base_indent:
+                break
+            body.append(nxt)
+            idx += 1
+        while body and not body[-1].strip():
+            body.pop()
+        content_lines = [b for b in body if b.strip()]
+        min_ind = min((len(b) - len(b.lstrip(" ")) for b in content_lines), default=0)
+        dedented = [b[min_ind:] if b.strip() else "" for b in body]
+        if style.startswith(">"):
+            value = " ".join(d.strip() for d in dedented if d.strip())
+        else:
+            value = "\n".join(dedented)
+        if not style.endswith("-"):
+            value += "\n"
+        out.append(f"{key_part}: {json.dumps(value, ensure_ascii=False)}")
+    return out
+
+
 def load_yaml_dict(path: Path) -> dict[str, Any]:
     """Load a YAML file into a Python dict using PyYAML or built-in recursive indentation parser."""
     if not path.exists():
@@ -196,7 +242,7 @@ def load_yaml_dict(path: Path) -> dict[str, Any]:
         return data
 
     prepared_lines: list[tuple[int, str]] = []
-    for raw_line in text.splitlines():
+    for raw_line in _fold_block_scalars(text.splitlines()):
         cleaned = _strip_yaml_comment(raw_line)
         if not cleaned.strip():
             continue
@@ -211,90 +257,103 @@ def load_yaml_dict(path: Path) -> dict[str, Any]:
     return parsed
 
 
-class YamlPromptTemplateRepository(PromptTemplateRepository):
-    """Repository loading versioned PromptTemplates from data/prompts/prompt_registry.yaml."""
+PROMPT_CATEGORY_FILES: tuple[str, ...] = (
+    "qa.yaml",
+    "technical_summary.yaml",
+    "managerial_summary.yaml",
+    "issue_decomposition.yaml",
+    "sub_issue_comparison.yaml",
+    "executor_analysis.yaml",
+    "research_gap.yaml",
+    "knowledge_transfer.yaml",
+    "rfp_generation.yaml",
+    "proposal_evaluation.yaml",
+    "feedback_generation.yaml",
+    "judge.yaml",
+)
 
-    DEFAULT_REGISTRY_PATH = (
-        Path(__file__).resolve().parents[4] / "data" / "prompts" / "prompt_registry.yaml"
-    )
+
+class YamlPromptTemplateRepository(PromptTemplateRepository):
+    """Repository loading versioned PromptTemplates from per-category YAML files in data/prompts/.
+
+    Each file defines ``promptId``, ``taskType``, ``activeVersion`` and a ``versions`` list.
+    The entry matching ``activeVersion`` becomes the active template; all others are kept as history.
+    """
+
+    DEFAULT_PROMPTS_DIR = Path(__file__).resolve().parents[4] / "data" / "prompts"
 
     def __init__(self, prompts_path: Path | str | None = None) -> None:
-        target = Path(prompts_path) if prompts_path is not None else self.DEFAULT_REGISTRY_PATH
+        target = Path(prompts_path) if prompts_path is not None else self.DEFAULT_PROMPTS_DIR
         if target.is_dir():
-            registry_file = target / "prompt_registry.yaml"
+            files = sorted(p for p in target.glob("*.yaml"))
+        elif target.exists():
+            files = [target]
         else:
-            registry_file = target
+            raise FileNotFoundError(f"Prompt path not found: {target}")
+        if not files:
+            raise DomainValidationError(f"No prompt YAML files found in {target}")
 
-        self._registry_file = registry_file
+        self._prompts_path = target
         self._templates_by_id_ver: dict[tuple[str, str], PromptTemplate] = {}
         self._active_by_id: dict[str, PromptTemplate] = {}
         self._active_by_task: dict[PromptTaskCategory, PromptTemplate] = {}
-        self._registry_version: str = ""
-        self._load_from_yaml(registry_file)
+        self._source_files: dict[str, Path] = {}
+        for f in files:
+            self._load_prompt_file(f)
 
     @property
-    def registry_version(self) -> str:
-        return self._registry_version
+    def source_files(self) -> dict[str, Path]:
+        """Mapping of promptId -> YAML file it was loaded from."""
+        return dict(self._source_files)
 
-    def _load_from_yaml(self, registry_file: Path) -> None:
-        raw = load_yaml_dict(registry_file)
-        self._registry_version = str(raw.get("registryVersion", "1.0.0"))
-        active_index = raw.get("activePrompts", {})
-        prompts_list = raw.get("prompts", [])
-        if not isinstance(prompts_list, list) or not prompts_list:
+    def _load_prompt_file(self, prompt_file: Path) -> None:
+        raw = load_yaml_dict(prompt_file)
+        for key in ("promptId", "taskType", "activeVersion", "versions"):
+            if key not in raw:
+                raise DomainValidationError(f"Prompt file {prompt_file.name} missing '{key}'.")
+        prompt_id = str(raw["promptId"])
+        if prompt_id in self._source_files:
             raise DomainValidationError(
-                f"No 'prompts' list found in prompt registry: {registry_file}"
+                f"Duplicate promptId '{prompt_id}' in {prompt_file.name} and "
+                f"{self._source_files[prompt_id].name}."
             )
+        task_cat = PromptTaskCategory(str(raw["taskType"]))
+        active_ver = str(raw["activeVersion"]).strip()
+        versions = raw["versions"]
+        if not isinstance(versions, list) or not versions:
+            raise DomainValidationError(f"Prompt file {prompt_file.name} has no versions.")
 
-        for p_item in prompts_list:
-            if not isinstance(p_item, dict):
-                continue
-            prompt_id = str(p_item["promptId"])
-            task_cat = PromptTaskCategory(str(p_item["taskType"]))
-            version = VersionTag.from_version_id(str(p_item["version"]))
-            last_updated = str(p_item.get("lastUpdated", "2026-10-29"))
-            sys_tpl = str(p_item["systemTemplate"])
-            usr_tpl = str(p_item["userTemplate"])
-            req_vars = tuple(str(v) for v in p_item.get("requiredVariables", []))
-            out_fmt = ExpectedOutputFormat.from_dict(p_item["expectedOutputFormat"])
-            cit_pol = CitationPolicy(str(p_item["citationPolicy"]))
-            rubric_id = str(p_item["judgeRubricId"])
-            raw_history = p_item.get("history") or []
-            history_entries = tuple(
-                PromptHistoryEntry.from_dict(h) for h in raw_history if isinstance(h, dict)
+        active_entry = next(
+            (v for v in versions if isinstance(v, dict) and str(v.get("version")) == active_ver),
+            None,
+        )
+        if active_entry is None:
+            raise DomainValidationError(
+                f"activeVersion '{active_ver}' not found in versions of {prompt_file.name}."
             )
-
-            template = PromptTemplate(
-                prompt_id=prompt_id,
-                task_type=task_cat,
-                version=version,
-                last_updated=last_updated,
-                system_template=sys_tpl,
-                user_template=usr_tpl,
-                required_variables=req_vars,
-                expected_output_format=out_fmt,
-                citation_policy=cit_pol,
-                judge_rubric_id=rubric_id,
-                history=history_entries,
-            )
-            self.save(template)
-
-        # Validate activePrompts index against loaded templates
-        if isinstance(active_index, dict):
-            for task_key, idx_info in active_index.items():
-                if not isinstance(idx_info, dict):
-                    continue
-                cat = PromptTaskCategory(str(task_key))
-                expected_pid = str(idx_info["promptId"])
-                expected_ver = str(idx_info["activeVersion"])
-                resolved = self.get_by_id_and_version(expected_pid, expected_ver)
-                if resolved is None:
-                    raise DomainValidationError(
-                        f"Active prompt '{expected_pid}@{expected_ver}' for task '{task_key}' "
-                        f"not found in {registry_file}."
-                    )
-                self._active_by_id[expected_pid] = resolved
-                self._active_by_task[cat] = resolved
+        history_entries = tuple(
+            PromptHistoryEntry.from_dict(v)
+            for v in versions
+            if isinstance(v, dict) and str(v.get("version")) != active_ver
+        )
+        template = PromptTemplate(
+            prompt_id=prompt_id,
+            task_type=task_cat,
+            version=VersionTag.from_version_id(active_ver),
+            last_updated=str(active_entry.get("lastUpdated", "2026-10-29")),
+            system_template=str(active_entry["systemTemplate"]),
+            user_template=str(active_entry["userTemplate"]),
+            required_variables=tuple(str(x) for x in active_entry.get("requiredVariables", [])),
+            expected_output_format=ExpectedOutputFormat.from_dict(
+                active_entry["expectedOutputFormat"]
+            ),
+            citation_policy=CitationPolicy(str(active_entry["citationPolicy"])),
+            judge_rubric_id=str(active_entry["judgeRubricId"]),
+            history=history_entries,
+            target_model_id=str(raw.get("targetModelId", "diba-base")),
+        )
+        self._source_files[prompt_id] = prompt_file
+        self.save(template)
 
     def save(self, template: PromptTemplate) -> None:
         self._templates_by_id_ver[(template.prompt_id, template.version.tag)] = template
@@ -351,7 +410,7 @@ class YamlPromptTemplateRepository(PromptTemplateRepository):
 
 
 class FixtureConfigLoader:
-    """Loader and validator for layers.yaml, nodes.yaml, models.yaml, and prompt_registry.yaml."""
+    """Loader and validator for layers.yaml, nodes.yaml, models.yaml, and data/prompts/*.yaml."""
 
     @staticmethod
     def load_transfer_rules(layers_yaml_path: Path) -> tuple[LayerTransferRule, ...]:
@@ -483,14 +542,14 @@ class FixtureConfigLoader:
     def load_prompt_registry(
         prompts_path: Path | None = None,
     ) -> YamlPromptTemplateRepository:
-        """Load data/prompts/prompt_registry.yaml into a YamlPromptTemplateRepository."""
+        """Load per-category data/prompts/*.yaml files into a YamlPromptTemplateRepository."""
         return YamlPromptTemplateRepository(prompts_path=prompts_path)
 
     @staticmethod
     def bootstrap_in_memory_uow(
         fixtures_dir: Path, prompts_dir: Path | None = None
     ) -> InMemoryUnitOfWork:
-        """Load layers.yaml, nodes.yaml, models.yaml, and prompt_registry.yaml into an InMemoryUnitOfWork."""
+        """Load layers.yaml, nodes.yaml, models.yaml, and data/prompts/*.yaml into an InMemoryUnitOfWork."""
         uow = InMemoryUnitOfWork()
         layers, nodes, rules = FixtureConfigLoader.load_hierarchy(
             nodes_yaml_path=fixtures_dir / "nodes.yaml",
@@ -504,7 +563,7 @@ class FixtureConfigLoader:
             else fixtures_dir.parent / "prompts"
         )
         prompt_templates: Sequence[PromptTemplate] = ()
-        if (resolved_prompts_dir / "prompt_registry.yaml").exists():
+        if resolved_prompts_dir.is_dir() and any(resolved_prompts_dir.glob("*.yaml")):
             yaml_repo = YamlPromptTemplateRepository(resolved_prompts_dir)
             prompt_templates = yaml_repo.list_all_active()
 
@@ -525,6 +584,7 @@ class FixtureConfigLoader:
 
 __all__ = [
     "FixtureConfigLoader",
+    "PROMPT_CATEGORY_FILES",
     "YamlPromptTemplateRepository",
     "load_yaml_dict",
 ]

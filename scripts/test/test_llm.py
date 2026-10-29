@@ -1,7 +1,7 @@
 """Upgraded offline LLM diagnostic and benchmark script.
 
 Reads LLM settings from ``data/fixtures/models.yaml`` and versioned prompts from
-``data/prompts/prompt_registry.yaml`` via ``YamlPromptTemplateRepository`` and ``PromptAssembler``.
+per-category ``data/prompts/*.yaml`` files via ``YamlPromptTemplateRepository`` and ``PromptAssembler``.
 Tests:
 1. Local server connectivity (with automatic offline fallback if server is down).
 2. Time to First Token (TTFT) and token generation speed (tok/s).
@@ -35,7 +35,7 @@ from offline_rag.infrastructure.config import (  # noqa: E402
 )
 
 DEFAULT_MODELS_YAML = REPO_ROOT / "data" / "fixtures" / "models.yaml"
-DEFAULT_PROMPTS_YAML = REPO_ROOT / "data" / "prompts" / "prompt_registry.yaml"
+DEFAULT_PROMPTS_YAML = REPO_ROOT / "data" / "prompts"
 
 
 def load_yaml_file(path: Path) -> dict[str, Any]:
@@ -183,7 +183,7 @@ def test_structured_json_stability(
     prompts_path: Path = DEFAULT_PROMPTS_YAML,
     prompt_version: str = "1.0.0",
 ) -> dict[str, Any]:
-    """Test LLM structured JSON output stability using versioned prompt from prompt_registry.yaml."""
+    """Test LLM structured JSON output stability using versioned prompt from data/prompts/knowledge_transfer.yaml."""
     assembler = build_prompt_assembler(prompts_path)
     assembled = assembler.assemble(
         prompt_id="PRM-TRANSFER-PREP",
@@ -259,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
-    parser = argparse.ArgumentParser(description="Test offline LLM from models.yaml and prompt_registry.yaml.")
+    parser = argparse.ArgumentParser(description="Test offline LLM from models.yaml and data/prompts/*.yaml.")
     parser.add_argument(
         "--config",
         type=Path,
@@ -270,13 +270,13 @@ def main(argv: list[str] | None = None) -> int:
         "--prompts",
         type=Path,
         default=DEFAULT_PROMPTS_YAML,
-        help="Path to data/prompts/prompt_registry.yaml",
+        help="Path to data/prompts/ directory (or a single prompt YAML file)",
     )
     parser.add_argument(
         "--prompt-version",
         type=str,
         default="1.0.0",
-        help="Explicit prompt version to assemble from prompt_registry.yaml",
+        help="Explicit prompt version to assemble from data/prompts/",
     )
     parser.add_argument("--runs", type=int, default=3, help="Number of benchmark iterations")
     args = parser.parse_args(argv)

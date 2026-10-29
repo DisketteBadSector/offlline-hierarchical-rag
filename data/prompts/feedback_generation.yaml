@@ -1,0 +1,57 @@
+# قالب پرامپت دسته «تولید بازخورد» — هسته RAG سلسله‌مراتبی آفلاین
+# نسخه فعال با activeVersion تعیین می‌شود؛ نسخه‌های قبلی هرگز حذف نمی‌شوند.
+
+promptId: "PRM-FEEDBACK-GEN"
+taskType: "feedback_generation"
+targetModelId: "diba-base"
+activeVersion: "1.0.0"
+
+versions:
+  - version: "1.0.0"
+    lastUpdated: "2026-10-29"
+    systemTemplate: |
+      تو تولیدکننده گزارش بازخورد ساخت‌یافته برای پیشنهادهای RFP هستی. نقاط قوت، نقاط ضعف، نیازمندی‌های مفقود، ریسک‌های فنی و توصیه نهایی (select/revise/reject) را با ارجاع به معیارهای RFP استخراج کن.
+    userTemplate: |
+      سند RFP مرجع:
+      {{rfp_reference}}
+      خلاصه پیشنهاد:
+      {{proposal_summary}}
+      نتیجه ارزیابی معیارها:
+      {{evaluation_summary}}
+    requiredVariables:
+      - "rfp_reference"
+      - "proposal_summary"
+      - "evaluation_summary"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "strengths"
+        - "weaknesses"
+        - "missing_requirements"
+        - "technical_risks"
+        - "recommendation"
+        - "criterion_references"
+    citationPolicy: "strict_source_id"
+    judgeRubricId: "RUBRIC-FEEDBACK-20"
+
+  - version: "0.9.0"
+    lastUpdated: "2026-10-21"
+    systemTemplate: |
+      بازخورد پیشنهاد را بنویس.
+    userTemplate: |
+      پیشنهاد:
+      {{proposal_summary}}
+      ارزیابی:
+      {{evaluation_summary}}
+    requiredVariables:
+      - "proposal_summary"
+      - "evaluation_summary"
+    expectedOutputFormat:
+      format: "markdown"
+      requiredKeys:
+        - "strengths"
+        - "weaknesses"
+        - "recommendation"
+    citationPolicy: "optional"
+    judgeRubricId: "RUBRIC-FEEDBACK-20"
+    changeNote: "الزام ارجاع به معیارهای RFP در فیلد criterion_references"

@@ -26,7 +26,7 @@ from offline_rag.infrastructure.config import (
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PROMPTS_DIR = REPO_ROOT / "data" / "prompts"
-PROMPT_REGISTRY_YAML = PROMPTS_DIR / "prompt_registry.yaml"
+PROMPT_REGISTRY_YAML = PROMPTS_DIR
 
 ALL_12_TASK_TYPES = (
     "qa",
@@ -45,7 +45,7 @@ ALL_12_TASK_TYPES = (
 
 
 def test_load_all_12_prompt_categories_from_yaml_registry() -> None:
-    """Verify all 12 standard prompt categories are loaded from data/prompts/prompt_registry.yaml."""
+    """Verify all 12 standard prompt categories are loaded from 12 separate files in data/prompts/."""
     assert PROMPT_REGISTRY_YAML.exists()
     repo = YamlPromptTemplateRepository(PROMPTS_DIR)
 
@@ -196,3 +196,87 @@ def test_bootstrap_uow_loads_prompt_registry_and_test_llm_uses_assembler() -> No
     judge_tpl = uow.prompts.get_latest_by_task(PromptTaskCategory.LLM_AS_JUDGE)
     assert judge_tpl is not None
     assert judge_tpl.prompt_id == "PRM-JUDGE"
+
+
+def test_each_category_is_stored_in_its_own_yaml_file() -> None:
+    """Verify the 12 categories map one-to-one onto the 12 separate YAML files in data/prompts/."""
+    from offline_rag.infrastructure.config import PROMPT_CATEGORY_FILES
+
+    assert not (PROMPTS_DIR / "prompt_registry.yaml").exists()
+    on_disk = sorted(p.name for p in PROMPTS_DIR.glob("*.yaml"))
+    assert on_disk == sorted(PROMPT_CATEGORY_FILES)
+
+    repo = YamlPromptTemplateRepository(PROMPTS_DIR)
+    files_by_id = {pid: path.name for pid, path in repo.source_files.items()}
+    assert len(files_by_id) == 12
+    assert files_by_id["PRM-QA"] == "qa.yaml"
+    assert files_by_id["PRM-EXEC-SUM"] == "managerial_summary.yaml"
+    assert files_by_id["PRM-JUDGE"] == "judge.yaml"
+
+    # A single file can also be loaded on its own
+    single = YamlPromptTemplateRepository(PROMPTS_DIR / "qa.yaml")
+    assert len(single.list_all_active()) == 1
+    # Block scalar (|) multi-line templates are preserved line by line
+    assert "{{context}}" in single.get_active_by_id("PRM-QA").user_template  # type: ignore[union-attr]
+    assert "\n" in single.get_active_by_id("PRM-QA").user_template  # type: ignore[union-attr]
+
+
+def test_per_file_schema_supports_string_output_format_and_validates_active_version(
+    tmp_path: Path,
+) -> None:
+    """Verify the documented sample schema (string expectedOutputFormat, flow lists) and activeVersion checks."""
+    sample = tmp_path / "qa.yaml"
+    sample.write_text(
+        "\n".join(
+            [
+                'promptId: "PRM-QA"',
+                'taskType: "qa"',
+                'activeVersion: "1.0.0"',
+                "",
+                "versions:",
+                '  - version: "1.0.0"',
+                '    lastUpdated: "2026-10-29"',
+                "    systemTemplate: |",
+                "      تو یک دستیار هوش مصنوعی آفلاین هستی.",
+                "    userTemplate: |",
+                "      [زمینه منبع]:",
+                "      {{context}}",
+                "",
+                "      [پرسش کاربر]:",
+                "      {{query}}",
+                "    requiredVariables:",
+                '      - "context"',
+                '      - "query"',
+                '    expectedOutputFormat: "markdown"',
+                '    citationPolicy: "strict_source_id"',
+                '    judgeRubricId: "RUBRIC-STANDARD-20"',
+                "",
+                "  # نسخه قبلی",
+                '  - version: "0.9.0"',
+                '    lastUpdated: "2026-10-25"',
+                '    systemTemplate: "نسخه قدیمی‌تر..."',
+                '    userTemplate: "{{context}} / {{query}}"',
+                '    requiredVariables: ["context", "query"]',
+                '    expectedOutputFormat: "markdown"',
+                '    citationPolicy: "optional"',
+                '    judgeRubricId: "RUBRIC-STANDARD-20"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    repo = YamlPromptTemplateRepository(sample)
+    active = repo.get_active_by_id("PRM-QA")
+    assert active is not None
+    assert active.expected_output_format.format == "markdown"
+    assert active.user_template == "[زمینه منبع]:\n{{context}}\n\n[پرسش کاربر]:\n{{query}}"
+    old = repo.get_by_id_and_version("PRM-QA", "0.9.0")
+    assert old is not None and old.required_variables == ("context", "query")
+
+    broken = tmp_path / "broken.yaml"
+    broken.write_text(
+        sample.read_text(encoding="utf-8").replace('activeVersion: "1.0.0"', 'activeVersion: "2.0.0"'),
+        encoding="utf-8",
+    )
+    with pytest.raises(DomainValidationError):
+        YamlPromptTemplateRepository(broken)

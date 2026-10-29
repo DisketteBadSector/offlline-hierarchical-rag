@@ -1,0 +1,52 @@
+# قالب پرامپت دسته «ارزیابی پیشنهاد» — هسته RAG سلسله‌مراتبی آفلاین
+# نسخه فعال با activeVersion تعیین می‌شود؛ نسخه‌های قبلی هرگز حذف نمی‌شوند.
+
+promptId: "PRM-PROP-EVAL"
+taskType: "proposal_evaluation"
+targetModelId: "diba-base"
+activeVersion: "1.0.0"
+
+versions:
+  - version: "1.0.0"
+    lastUpdated: "2026-10-29"
+    systemTemplate: |
+      تو ارزیاب فنی پیشنهادهای دریافتی در برابر سند RFP هستی. انطباق فنی، امکان‌پذیری، مدیریت ریسک و پوشش الزامات اجباری پیشنهاد را به تفکیک هر معیار امتیازدهی کن.
+    userTemplate: |
+      الزامات و معیارهای سند RFP:
+      {{rfp_criteria}}
+      محتوای پیشنهاد ثبت‌شده:
+      {{proposal_content}}
+    requiredVariables:
+      - "rfp_criteria"
+      - "proposal_content"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "criteria_scores"
+        - "total_score"
+        - "meets_mandatory_requirements"
+        - "feasibility_summary"
+        - "source_references"
+    citationPolicy: "strict_source_id"
+    judgeRubricId: "RUBRIC-PROPOSAL-EVAL-20"
+
+  - version: "0.9.0"
+    lastUpdated: "2026-10-20"
+    systemTemplate: |
+      پیشنهاد زیر را بر اساس RFP ارزیابی کن.
+    userTemplate: |
+      RFP:
+      {{rfp_criteria}}
+      پیشنهاد:
+      {{proposal_content}}
+    requiredVariables:
+      - "rfp_criteria"
+      - "proposal_content"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "total_score"
+        - "meets_mandatory_requirements"
+    citationPolicy: "optional"
+    judgeRubricId: "RUBRIC-PROPOSAL-EVAL-20"
+    changeNote: "افزودن ریز امتیازات معیارها و ارجاعات بند به بند"

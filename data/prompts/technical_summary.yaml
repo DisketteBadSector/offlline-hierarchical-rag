@@ -1,0 +1,53 @@
+# قالب پرامپت دسته «خلاصه‌سازی فنی» — هسته RAG سلسله‌مراتبی آفلاین
+# نسخه فعال با activeVersion تعیین می‌شود؛ نسخه‌های قبلی هرگز حذف نمی‌شوند.
+
+promptId: "PRM-TECH-SUM"
+taskType: "technical_summary"
+targetModelId: "diba-base"
+activeVersion: "1.0.0"
+
+versions:
+  - version: "1.0.0"
+    lastUpdated: "2026-10-29"
+    systemTemplate: |
+      تو تحلیلگر ارشد فنی در هسته RAG آفلاین هستی. دانش فنی گره را با حفظ روش‌ها، نتایج پژوهشی، محدودیت‌ها و توانمندی مجریان خلاصه کن.
+    userTemplate: |
+      گره مبدأ: {{node_id}}
+      سطح جزئیات هدف: {{detail_level}}
+      حداکثر طول مجاز: {{max_length}}
+      محتوای اسناد فنی:
+      {{source_content}}
+    requiredVariables:
+      - "node_id"
+      - "detail_level"
+      - "max_length"
+      - "source_content"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "methods"
+        - "research_results"
+        - "limitations"
+        - "executor_capabilities"
+        - "source_references"
+    citationPolicy: "strict_source_id"
+    judgeRubricId: "RUBRIC-TECH-SUMMARY-20"
+
+  - version: "0.9.0"
+    lastUpdated: "2026-10-15"
+    systemTemplate: |
+      تو خلاصه‌ساز متون فنی هستی.
+    userTemplate: |
+      متن فنی گره {{node_id}} را خلاصه کن:
+      {{source_content}}
+    requiredVariables:
+      - "node_id"
+      - "source_content"
+    expectedOutputFormat:
+      format: "markdown"
+      requiredKeys:
+        - "methods"
+        - "research_results"
+    citationPolicy: "optional"
+    judgeRubricId: "RUBRIC-TECH-SUMMARY-20"
+    changeNote: "ارتقا به خروجی JSON منطبق با فیلدهای الزامی لایه ۲ در layers.yaml"

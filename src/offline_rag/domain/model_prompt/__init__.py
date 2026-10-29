@@ -121,6 +121,8 @@ class ExpectedOutputFormat:
     def from_dict(cls, data: Mapping[str, Any] | ExpectedOutputFormat) -> ExpectedOutputFormat:
         if isinstance(data, ExpectedOutputFormat):
             return data
+        if isinstance(data, str):
+            return cls(format=data, required_keys=())
         if not isinstance(data, Mapping):
             raise DomainValidationError("ExpectedOutputFormat data must be a mapping.")
         fmt = str(data.get("format", "json"))

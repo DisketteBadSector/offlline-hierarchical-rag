@@ -1,0 +1,51 @@
+# قالب پرامپت دسته «مقایسه زیرمسئله‌ها» — هسته RAG سلسله‌مراتبی آفلاین
+# نسخه فعال با activeVersion تعیین می‌شود؛ نسخه‌های قبلی هرگز حذف نمی‌شوند.
+
+promptId: "PRM-SUBISSUE-CMP"
+taskType: "sub_issue_comparison"
+targetModelId: "diba-base"
+activeVersion: "1.0.0"
+
+versions:
+  - version: "1.0.0"
+    lastUpdated: "2026-10-29"
+    systemTemplate: |
+      تو تحلیلگر مقایسه مسائل و تشخیص هم‌پوشانی معنایی هستی. زیرمسئله نامزد را با فهرست مسائل موجود مقایسه کرده و تکرار، شباهت یا وابستگی را مشخص کن.
+    userTemplate: |
+      زیرمسئله نامزد:
+      {{candidate_sub_issue}}
+      مسائل و زیرمسائل موجود در گره:
+      {{existing_issues}}
+      حد آستانه تشابه: {{similarity_threshold}}
+    requiredVariables:
+      - "candidate_sub_issue"
+      - "existing_issues"
+      - "similarity_threshold"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "is_duplicate"
+        - "similar_issue_ids"
+        - "similarity_score"
+        - "recommendation"
+    citationPolicy: "strict_source_id"
+    judgeRubricId: "RUBRIC-DEFAULT-20"
+
+  - version: "0.9.0"
+    lastUpdated: "2026-10-17"
+    systemTemplate: |
+      دو مسئله زیر را از نظر تشابه مقایسه کن.
+    userTemplate: |
+      مسئله جدید: {{candidate_sub_issue}}
+      مسائل قبلی: {{existing_issues}}
+    requiredVariables:
+      - "candidate_sub_issue"
+      - "existing_issues"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "is_duplicate"
+        - "similar_issue_ids"
+    citationPolicy: "optional"
+    judgeRubricId: "RUBRIC-DEFAULT-20"
+    changeNote: "افزودن پارامتر similarity_threshold و توصیه ادغام یا حفظ"

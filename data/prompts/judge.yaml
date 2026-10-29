@@ -1,0 +1,58 @@
+# قالب پرامپت دسته «امتیازدهی LLM به‌عنوان داور» — هسته RAG سلسله‌مراتبی آفلاین
+# نسخه فعال با activeVersion تعیین می‌شود؛ نسخه‌های قبلی هرگز حذف نمی‌شوند.
+
+promptId: "PRM-JUDGE"
+taskType: "llm_as_judge"
+targetModelId: "diba-base"
+activeVersion: "1.0.0"
+
+versions:
+  - version: "1.0.0"
+    lastUpdated: "2026-10-29"
+    systemTemplate: |
+      تو داور کنترل کیفیت (LLM-as-a-Judge) در هسته RAG سلسله‌مراتبی آفلاین هستی. خروجی تولیدشده را با دانش منبع، درخواست کاربر و چارچوب ۲۰ امتیازی مقایسه و امتیازدهی کن.
+    userTemplate: |
+      دانش منبع:
+      {{source_knowledge}}
+      درخواست یا قاعده لایه:
+      {{request_or_rule}}
+      خروجی تولیدشده جهت داوری:
+      {{candidate_output}}
+      حد نصاب قبولی: {{threshold}}
+    requiredVariables:
+      - "source_knowledge"
+      - "request_or_rule"
+      - "candidate_output"
+      - "threshold"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "score"
+        - "passed"
+        - "explanation"
+        - "missing_information"
+        - "unsupported_claims"
+    citationPolicy: "strict_source_id"
+    judgeRubricId: "RUBRIC-DEFAULT-20"
+
+  - version: "0.9.0"
+    lastUpdated: "2026-10-21"
+    systemTemplate: |
+      خروجی زیر را از ۲۰ نمره داوری کن.
+    userTemplate: |
+      منبع:
+      {{source_knowledge}}
+      خروجی:
+      {{candidate_output}}
+    requiredVariables:
+      - "source_knowledge"
+      - "candidate_output"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "score"
+        - "passed"
+        - "explanation"
+    citationPolicy: "optional"
+    judgeRubricId: "RUBRIC-DEFAULT-20"
+    changeNote: "افزودن بررسی ادعاهای بدون پشتوانه و اطلاعات مفقود طبق بخش ۱۶.۲ پروپوزال"
