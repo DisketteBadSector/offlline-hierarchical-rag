@@ -1,0 +1,99 @@
+# رجیستری استاندارد مدل‌های کوچک آفلاین (فاز ۲)
+# این فایل منبع حقیقت برای تنظیمات مدل‌های محلی در سه دسته embedding، llm و lvm است.
+# اجرای مدل‌ها کاملاً آفلاین و از طریق سرور محلی سازگار با OpenAI API انجام می‌شود.
+
+version: "0.2.0-phase2"
+last_updated: "2026-10-29"
+
+runtime_policy:
+  offlineOnly: true
+  allowCloudFallback: false
+  defaultLoadingStrategy: "sequential_single_model"
+  referenceHardwareProfile: "system_a_rtx3050_6gb"
+
+models:
+  - modelId: "bge-m3"
+    role: "embedding"
+    sourceName: "BAAI/BGE-M3"
+    format: "safetensors-fp16"
+    localWeightsPath: "models/weights/bge-m3"
+    providerEndpoint: "http://localhost:1235/v1"
+    contextWindow: 8192
+    maxOutputTokens: 1024
+    embeddingDimension: 1024
+    temperatureDefault: 0.0
+    status: "selected"
+    supportedTasks:
+      - "semantic_embedding"
+      - "vector_retrieval"
+      - "duplicate_detection"
+      - "overlap_detection"
+      - "issue_similarity_comparison"
+    hardwareConstraints:
+      minVramGb: 2.0
+      minRamGb: 4.0
+      preferredDevice: "gpu"
+      cpuFallbackSupported: true
+      maxBatchSize: 16
+      recommendedChunkTokenLimit: 512
+      concurrentWithLlmOn6GbVram: false
+      executionMode: "sequential_load_unload"
+
+  - modelId: "diba-base"
+    role: "llm"
+    sourceName: "Dibachain/Diba-Base"
+    format: "gguf-q4_k_m"
+    localWeightsPath: "models/weights/diba-base-q4_k_m.gguf"
+    providerEndpoint: "http://localhost:1235/v1"
+    contextWindow: 4096
+    maxOutputTokens: 1024
+    temperatureDefault: 0.0
+    status: "selected"
+    supportedTasks:
+      - "question_answering"
+      - "technical_summarization"
+      - "managerial_executive_summarization"
+      - "issue_decomposition"
+      - "subissue_comparison"
+      - "executor_expertise_analysis"
+      - "research_gap_identification"
+      - "knowledge_transfer_preparation"
+      - "rfp_generation"
+      - "proposal_evaluation"
+      - "feedback_generation"
+      - "llm_as_judge_scoring"
+    hardwareConstraints:
+      minVramGb: 4.0
+      minRamGb: 8.0
+      preferredDevice: "gpu"
+      cpuFallbackSupported: true
+      quantization: "Q4_K_M"
+      gpuLayersOffload: "auto"
+      maxContextOn6GbVram: 4096
+      maxContextOn24GbRamCpu: 8192
+      concurrentWithLvmOn6GbVram: false
+      executionMode: "sequential_load_unload"
+
+  - modelId: "glm-ocr"
+    role: "lvm"
+    sourceName: "zai-org/GLM-OCR"
+    format: "safetensors-bf16"
+    localWeightsPath: "models/weights/glm-ocr"
+    providerEndpoint: "http://localhost:1235/v1"
+    contextWindow: 4096
+    maxOutputTokens: 2048
+    temperatureDefault: 0.0
+    status: "selected"
+    supportedTasks:
+      - "document_layout_analysis"
+      - "scanned_pdf_ocr"
+      - "table_and_figure_extraction"
+    hardwareConstraints:
+      minVramGb: 3.5
+      minRamGb: 8.0
+      preferredDevice: "gpu"
+      cpuFallbackSupported: true
+      cpuPerformanceWarning: "High latency per page on CPU; run as isolated preprocessing batch"
+      maxPagesPerBatch: 1
+      concurrentWithLlmOn6GbVram: false
+      executionMode: "isolated_preprocessing_stage"

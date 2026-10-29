@@ -1,0 +1,54 @@
+# قالب پرامپت دسته «آماده‌سازی انتقال دانش» — هسته RAG سلسله‌مراتبی آفلاین
+# نسخه فعال با activeVersion تعیین می‌شود؛ نسخه‌های قبلی هرگز حذف نمی‌شوند.
+
+promptId: "PRM-TRANSFER-PREP"
+taskType: "knowledge_transfer_prep"
+targetModelId: "diba-base"
+activeVersion: "1.0.0"
+
+versions:
+  - version: "1.0.0"
+    lastUpdated: "2026-10-29"
+    systemTemplate: |
+      تو هماهنگ‌کننده انتقال دانش بین‌لایه‌ای در هسته RAG آفلاین هستی. بسته دانشی گره مبدأ را مطابق قواعد لایه مقصد و فیلدهای الزامی تنظیم و پالایش کن.
+    userTemplate: |
+      گره مبدأ: {{node_id}}
+      سطح جزئیات لایه مقصد: {{detail_level}}
+      فیلدهای الزامی قاعده لایه: {{required_fields}}
+      پیش‌نویس دانش و مسائل گره:
+      {{draft_payload}}
+    requiredVariables:
+      - "node_id"
+      - "detail_level"
+      - "required_fields"
+      - "draft_payload"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "node_id"
+        - "detail_level"
+        - "key_achievements"
+        - "unresolved_issues"
+        - "source_references"
+    citationPolicy: "strict_source_id"
+    judgeRubricId: "RUBRIC-TRANSFER-PACKAGE-20"
+
+  - version: "0.9.0"
+    lastUpdated: "2026-10-19"
+    systemTemplate: |
+      بسته انتقال دانش به لایه بالاتر را آماده کن.
+    userTemplate: |
+      گره: {{node_id}}
+      پیش‌نویس:
+      {{draft_payload}}
+    requiredVariables:
+      - "node_id"
+      - "draft_payload"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "node_id"
+        - "key_achievements"
+    citationPolicy: "optional"
+    judgeRubricId: "RUBRIC-TRANSFER-PACKAGE-20"
+    changeNote: "افزودن فیلدهای الزامی لایه مقصد و سطح جزئیات"

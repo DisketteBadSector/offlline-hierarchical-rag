@@ -1,0 +1,48 @@
+# قالب پرامپت دسته «تجزیه مسئله» — هسته RAG سلسله‌مراتبی آفلاین
+# نسخه فعال با activeVersion تعیین می‌شود؛ نسخه‌های قبلی هرگز حذف نمی‌شوند.
+
+promptId: "PRM-ISSUE-DEC"
+taskType: "issue_decomposition"
+targetModelId: "diba-base"
+activeVersion: "1.0.0"
+
+versions:
+  - version: "1.0.0"
+    lastUpdated: "2026-10-29"
+    systemTemplate: |
+      تو معمار تحلیل مسئله در هسته RAG آفلاین هستی. مسئله کلان را به زیرمسائل مستقل، قابل اقدام و دارای ترتیب نسبی مشخص تجزیه کن.
+    userTemplate: |
+      گره مالک: {{node_id}}
+      عنوان و شرح مسئله والد:
+      {{issue_description}}
+      دانش مرتبط موجود:
+      {{related_knowledge}}
+    requiredVariables:
+      - "node_id"
+      - "issue_description"
+      - "related_knowledge"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "parent_issue_summary"
+        - "sub_issues"
+        - "relative_order_rationale"
+    citationPolicy: "optional"
+    judgeRubricId: "RUBRIC-ISSUE-DECOMP-20"
+
+  - version: "0.9.0"
+    lastUpdated: "2026-10-17"
+    systemTemplate: |
+      مسئله زیر را به چند زیرمسئله تقسیم کن.
+    userTemplate: |
+      مسئله:
+      {{issue_description}}
+    requiredVariables:
+      - "issue_description"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "sub_issues"
+    citationPolicy: "none"
+    judgeRubricId: "RUBRIC-ISSUE-DECOMP-20"
+    changeNote: "افزودن دانش مرتبط و توجیه ترتیب نسبی زیرمسائل"

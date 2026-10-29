@@ -1,0 +1,51 @@
+# قالب پرامپت دسته «تحلیل تخصص مجریان» — هسته RAG سلسله‌مراتبی آفلاین
+# نسخه فعال با activeVersion تعیین می‌شود؛ نسخه‌های قبلی هرگز حذف نمی‌شوند.
+
+promptId: "PRM-EXEC-ANL"
+taskType: "executor_expertise_analysis"
+targetModelId: "diba-base"
+activeVersion: "1.0.0"
+
+versions:
+  - version: "1.0.0"
+    lastUpdated: "2026-10-29"
+    systemTemplate: |
+      تو متخصص نگاشت توانمندی مجریان در مدل Issue-Knowledge-Executor هستی. بر اساس پروفایل پرسنلی و سوابق پروژه، بهترین مجریان را برای حل مسئله پیشنهاد بده.
+    userTemplate: |
+      مشخصات مسئله:
+      {{issue_details}}
+      پروفایل مجریان نامزد:
+      {{executor_profiles}}
+      سوابق دانش و پروژه:
+      {{project_records}}
+    requiredVariables:
+      - "issue_details"
+      - "executor_profiles"
+      - "project_records"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "recommended_executors"
+        - "expertise_match_rationale"
+        - "identified_skill_gaps"
+        - "source_references"
+    citationPolicy: "strict_source_id"
+    judgeRubricId: "RUBRIC-EXECUTOR-MATCH-20"
+
+  - version: "0.9.0"
+    lastUpdated: "2026-10-18"
+    systemTemplate: |
+      مجری مناسب برای مسئله را انتخاب کن.
+    userTemplate: |
+      مسئله: {{issue_details}}
+      مجریان: {{executor_profiles}}
+    requiredVariables:
+      - "issue_details"
+      - "executor_profiles"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "recommended_executors"
+    citationPolicy: "optional"
+    judgeRubricId: "RUBRIC-EXECUTOR-MATCH-20"
+    changeNote: "افزودن سوابق پروژه و الزام ارجاع به شناسه پروفایل و سند"

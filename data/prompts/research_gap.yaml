@@ -1,0 +1,53 @@
+# قالب پرامپت دسته «شناسایی شکاف پژوهشی» — هسته RAG سلسله‌مراتبی آفلاین
+# نسخه فعال با activeVersion تعیین می‌شود؛ نسخه‌های قبلی هرگز حذف نمی‌شوند.
+
+promptId: "PRM-GAP-ID"
+taskType: "research_gap_identification"
+targetModelId: "diba-base"
+activeVersion: "1.0.0"
+
+versions:
+  - version: "1.0.0"
+    lastUpdated: "2026-10-29"
+    systemTemplate: |
+      تو تحلیلگر شکاف‌های پژوهشی و کمبود دانش سازمانی هستی. مسائلی که دانش پشتیبان کافی ندارند، منابع متعارض دارند یا در داوری رد شده‌اند را شناسایی و اولویت‌بندی کن.
+    userTemplate: |
+      گره سازمانی: {{node_id}}
+      مسائل باز:
+      {{open_issues}}
+      پوشش دانش فعلی:
+      {{knowledge_summary}}
+      سوابق داوری ناموفق:
+      {{failed_judgments}}
+    requiredVariables:
+      - "node_id"
+      - "open_issues"
+      - "knowledge_summary"
+      - "failed_judgments"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "research_gaps"
+        - "priority_ranking"
+        - "recommended_actions"
+        - "source_references"
+    citationPolicy: "strict_source_id"
+    judgeRubricId: "RUBRIC-DEFAULT-20"
+
+  - version: "0.9.0"
+    lastUpdated: "2026-10-18"
+    systemTemplate: |
+      شکاف‌های پژوهشی گره را فهرست کن.
+    userTemplate: |
+      مسائل باز: {{open_issues}}
+      دانش موجود: {{knowledge_summary}}
+    requiredVariables:
+      - "open_issues"
+      - "knowledge_summary"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "research_gaps"
+    citationPolicy: "optional"
+    judgeRubricId: "RUBRIC-DEFAULT-20"
+    changeNote: "افزودن ورودی failed_judgments و رتبه‌بندی اولویت"

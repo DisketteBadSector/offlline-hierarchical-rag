@@ -1,0 +1,54 @@
+# قالب پرامپت دسته «پرسش و پاسخ» — هسته RAG سلسله‌مراتبی آفلاین
+# نسخه فعال با activeVersion تعیین می‌شود؛ نسخه‌های قبلی هرگز حذف نمی‌شوند.
+
+promptId: "PRM-QA"
+taskType: "qa"
+targetModelId: "diba-base"
+activeVersion: "1.0.0"
+
+versions:
+  - version: "1.0.0"
+    lastUpdated: "2026-10-29"
+    systemTemplate: |
+      تو دستیار پرسش‌وپاسخ مبتنی بر منبع در هسته RAG سلسله‌مراتبی آفلاین هستی. فقط بر اساس قطعات دانش مجاز گره پاسخ بده و در صورت کمبود دانش، عدم قطعیت را صریح اعلام کن.
+    userTemplate: |
+      محدوده گره: {{node_scope}}
+      زمینه بازیابی‌شده:
+      {{context}}
+
+      پرسش کاربر:
+      {{query}}
+    requiredVariables:
+      - "node_scope"
+      - "context"
+      - "query"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "answer"
+        - "source_references"
+        - "uncertainty_declared"
+        - "uncertainty_reason"
+    citationPolicy: "strict_source_id"
+    judgeRubricId: "RUBRIC-DEFAULT-20"
+
+  - version: "0.9.0"
+    lastUpdated: "2026-10-15"
+    systemTemplate: |
+      تو دستیار پاسخ‌گویی آفلاین هستی. بر اساس متن داده شده به پرسش پاسخ بده.
+    userTemplate: |
+      زمینه:
+      {{context}}
+      پرسش:
+      {{query}}
+    requiredVariables:
+      - "context"
+      - "query"
+    expectedOutputFormat:
+      format: "json"
+      requiredKeys:
+        - "answer"
+        - "source_references"
+    citationPolicy: "optional"
+    judgeRubricId: "RUBRIC-DEFAULT-20"
+    changeNote: "نسخه اولیه پیش از افزودن متغیر node_scope و سیاست سخت‌گیرانه ارجاع منبع"
