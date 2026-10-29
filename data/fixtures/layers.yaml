@@ -1,7 +1,9 @@
-#TODO: complete it in phase 14
+# TODO: complete it in phase 14
 
-version: "0.1.0-phase1"
+version: "0.1.1-phase1"
+last_updated: "2026-10-29"
 
+maxLengthUnit: "characters"
 layer_transfer_rules:
   - targetLayerIndex: 0
     detailLevel: "executive_high"
@@ -33,7 +35,8 @@ layer_transfer_rules:
       - "executor_capabilities"
     maxLength: 8000
     minJudgeScore: 18
-
+  # TODO(phase 6/11): گیرنده این قاعده روشن نیست؛ لایه ۴ منبع دانش است و بسته دریافت نمی‌کند.
+  # یا برای درخواست فنی تفصیلی داخل لایه ۳ استفاده شود، یا حذف شود.
   - targetLayerIndex: 3
     detailLevel: "technical_detailed"
     requiredFields:

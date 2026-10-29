@@ -1,8 +1,12 @@
 # رجیستری اولیه گره‌های سازمانی (فاز ۱)
 # این فایل قابل ویرایش است و فهرست نهایی در مرحله تعریف مطالعه موردی تثبیت می‌شود.
+#
+# قواعد گزارش‌دهی (فیلدهای الزامی، سطح جزئیات، حداکثر طول، حد امتیاز) فقط در layers.yaml تعریف می‌شوند.
+# هر گره با transfer.ruleLayerIndex به قاعده مربوط اشاره می‌کند و فقط فیلدهای اضافه خاص خود را اینجا می‌آورد.
+# گیرنده بسته همیشه parentNodeId است.
 
-version: "0.1.0-phase1"
-last_updated: "2026-10-27"
+version: "0.1.1-phase1"
+last_updated: "2026-10-29"
 
 layers:
   - layerIndex: 0
@@ -34,14 +38,7 @@ nodes:
     activityDomain: "راهبری کلان"
     boundaryType: "ROOT"
     confidentiality: "internal"
-    reportingRules:
-      requiredSections:
-        - "executive_summary"
-        - "key_issues"
-        - "rfp_status"
-        - "research_gaps"
-      maxLength: 2000
-      detailLevel: "executive_high"
+    transfer: null
 
   - nodeId: "N-100"
     name: "سازمان مادر الف"
@@ -50,13 +47,11 @@ nodes:
     activityDomain: "فناوری اطلاعات"
     boundaryType: "INTERMEDIATE"
     confidentiality: "internal"
-    reportingRules:
-      requiredSections:
-        - "managerial_summary"
+    transfer:
+      ruleLayerIndex: 0
+      extraRequiredFields:
         - "risks"
         - "achievements"
-      maxLength: 4000
-      detailLevel: "managerial"
 
   - nodeId: "N-200"
     name: "مرکز پژوهشی ب"
@@ -65,14 +60,9 @@ nodes:
     activityDomain: "پژوهش نرم‌افزار"
     boundaryType: "INTERMEDIATE"
     confidentiality: "internal"
-    reportingRules:
-      requiredSections:
-        - "project_status"
-        - "issue_status"
-        - "research_gaps"
-        - "executor_capabilities"
-      maxLength: 8000
-      detailLevel: "technical_summary"
+    transfer:
+      ruleLayerIndex: 1
+      extraRequiredFields: []
 
   - nodeId: "N-300"
     name: "تیم پروژه پ"
@@ -81,14 +71,10 @@ nodes:
     activityDomain: "پیاده‌سازی RAG"
     boundaryType: "INTERMEDIATE"
     confidentiality: "restricted"
-    reportingRules:
-      requiredSections:
-        - "issue_details"
-        - "source_references"
-        - "executor_mapping"
+    transfer:
+      ruleLayerIndex: 2
+      extraRequiredFields:
         - "test_notes"
-      maxLength: 20000
-      detailLevel: "technical_detailed"
 
   - nodeId: "N-301"
     name: "تیم پژوهشی ت"
@@ -97,11 +83,10 @@ nodes:
     activityDomain: "پژوهش مدل کوچک"
     boundaryType: "LEAF"
     confidentiality: "restricted"
-    reportingRules:
-      requiredSections:
+    transfer:
+      ruleLayerIndex: 2
+      extraRequiredFields:
         - "research_notes"
-      maxLength: 20000
-      detailLevel: "technical_detailed"
 
   - nodeId: "N-400"
     name: "آرشیو اسناد محلی"
@@ -110,10 +95,7 @@ nodes:
     activityDomain: "مخزن دانش"
     boundaryType: "KNOWLEDGE_SOURCE"
     confidentiality: "internal"
-    reportingRules:
-      requiredSections: []
-      maxLength: 0
-      detailLevel: null
+    transfer: null
 
 validation_rules:
   - id: "R-01"
@@ -121,10 +103,14 @@ validation_rules:
   - id: "R-02"
     description: "هر گره (به‌جز ریشه) دقیقاً یک گره والد دارد"
   - id: "R-03"
-    description: "گره والد باید در لایه بالاتر یا همان لایه با LayerIndex کوچکتر باشد"
+    description: "LayerIndex گره والد باید کوچک‌تر از LayerIndex فرزند باشد (والد همیشه در لایه بالاتر است)"
   - id: "R-04"
     description: "گره Leaf نمی‌تواند فرزند داشته باشد"
   - id: "R-05"
     description: "حوزه فعالیت الزامی و غیرخالی است"
   - id: "R-06"
     description: "هر لایه (به‌جز لایه ۴) حداقل یک گره دارد"
+  - id: "R-07"
+    description: "اگر transfer مقدار دارد، ruleLayerIndex باید برابر LayerIndex گره منهای ۱ باشد و قاعده متناظر در layers.yaml وجود داشته باشد"
+  - id: "R-08"
+    description: "گره ROOT و گره KNOWLEDGE_SOURCE مقدار transfer برابر null دارند؛ سایر گره‌ها باید transfer معتبر داشته باشند"
