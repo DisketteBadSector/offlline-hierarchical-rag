@@ -23,7 +23,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "scripts" / "test") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "scripts" / "test"))
 
-from test_llm import _http_get_json, _http_post_json, load_yaml_file  # noqa: E402
+from test_llm import (  # noqa: E402
+    DEFAULT_PROMPTS_YAML,
+    _http_get_json,
+    _http_post_json,
+    build_prompt_assembler,
+    load_yaml_file,
+)
 
 DEFAULT_MODELS_YAML = REPO_ROOT / "data" / "fixtures" / "models.yaml"
 
@@ -177,16 +183,26 @@ def benchmark_llm_model(cfg: dict[str, Any], runs: int = 3, force_fallback: bool
     schema_valid_count = 0
     mode = "offline_fallback"
 
-    required_keys = {"score", "passed", "explanation", "missing_information", "unsupported_claims"}
-    system_prompt = (
-        "تو داور ارزیاب کیفیت (LLM-as-a-Judge) در سامانه RAG آفلاین هستی. "
-        "خروجی را صرفاً در قالب JSON معتبر با کلیدهای score (عدد ۰ تا ۲۰)، passed (بولین)، "
-        "explanation (رشته)، missing_information (آرایه) و unsupported_claims (آرایه) برگردان."
+    assembler = build_prompt_assembler(DEFAULT_PROMPTS_YAML)
+    assembled_judge = assembler.assemble(
+        prompt_id="PRM-JUDGE",
+        version="1.0.0",
+        variables={
+            "source_knowledge": "[DOC-01#p1] پروژه الف نمایه‌سازی اسناد DOCX را تکمیل کرد.",
+            "request_or_rule": "technical_summary",
+            "candidate_output": "پروژه الف با موفقیت نمایه‌سازی اسناد DOCX را تکمیل کرد [منبع: DOC-01#p1].",
+            "threshold": "18",
+        },
     )
-    user_prompt = (
-        "خلاصه تولیدشده: «پروژه الف با موفقیت نمایه‌سازی اسناد DOCX را تکمیل کرد [منبع: DOC-01].» "
-        "حد آستانه قبولی ۱۸ از ۲۰ است. نتیجه داوری را در قالب JSON برگردان."
-    )
+    required_keys = {
+        "score",
+        "passed",
+        "explanation",
+        "missing_information",
+        "unsupported_claims",
+    }
+    system_prompt = assembled_judge.system_message
+    user_prompt = assembled_judge.user_message
 
     for _ in range(runs):
         if is_alive:
@@ -277,15 +293,22 @@ def benchmark_lvm_model(cfg: dict[str, Any], force_fallback: bool = False) -> di
 
     if is_alive and target_model:
         try:
-            prompt = (
-                "چیدمان صفحه نمونه سند فنی را تحلیل کن و خروجی JSON شامل کلیدهای "
-                "page_number، detected_elements (آرایه)، tables_count و extracted_summary تولید کن."
+            assembler = build_prompt_assembler(DEFAULT_PROMPTS_YAML)
+            assembled_lvm = assembler.assemble(
+                prompt_id="PRM-TECH-SUM",
+                version="1.0.0",
+                variables={
+                    "node_id": "N-301",
+                    "detail_level": "technical_detailed",
+                    "max_length": "300",
+                    "source_content": "[S-09-scanned-sample.pdf#p1] تحلیل چیدمان صفحه نمونه سند فنی",
+                },
             )
             body = _http_post_json(
                 f"{endpoint.rstrip('/')}/chat/completions",
                 {
                     "model": target_model,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": assembled_lvm.to_messages(),
                     "max_tokens": 300,
                     "temperature": temperature,
                 },

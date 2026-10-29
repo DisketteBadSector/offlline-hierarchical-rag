@@ -292,15 +292,32 @@ class InMemoryPromptTemplateRepository(PromptTemplateRepository):
 
     def __init__(self) -> None:
         self._templates: dict[tuple[str, str], PromptTemplate] = {}
+        self._active_by_id: dict[str, PromptTemplate] = {}
 
     def save(self, template: PromptTemplate) -> None:
         self._templates[(template.template_id, template.version_tag.tag)] = template
+        for hist in template.history:
+            snap = template.get_version_snapshot(hist.version)
+            if snap is not None:
+                self._templates[(template.template_id, hist.version.tag)] = snap
+        existing = self._active_by_id.get(template.template_id)
+        if existing is None or template.version_tag.sequence_number >= existing.version_tag.sequence_number:
+            self._active_by_id[template.template_id] = template
+
+    def get_active_by_id(self, prompt_id: str) -> PromptTemplate | None:
+        return self._active_by_id.get(prompt_id)
 
     def get_by_id_and_version(
         self, template_id: str, version_tag: VersionTag | str
     ) -> PromptTemplate | None:
-        tag = version_tag.tag if isinstance(version_tag, VersionTag) else str(version_tag)
-        return self._templates.get((template_id, tag))
+        tag = version_tag.tag if isinstance(version_tag, VersionTag) else str(version_tag).strip()
+        direct = self._templates.get((template_id, tag))
+        if direct is not None:
+            return direct
+        active = self._active_by_id.get(template_id)
+        if active is not None:
+            return active.get_version_snapshot(tag)
+        return None
 
     def list_by_task(self, task_category: PromptTaskCategory | str) -> Sequence[PromptTemplate]:
         cat = (
@@ -312,7 +329,15 @@ class InMemoryPromptTemplateRepository(PromptTemplateRepository):
         return tuple(sorted(matched, key=lambda t: t.version_tag.sequence_number))
 
     def get_latest_by_task(self, task_category: PromptTaskCategory | str) -> PromptTemplate | None:
-        items = self.list_by_task(task_category)
+        cat = (
+            task_category
+            if isinstance(task_category, PromptTaskCategory)
+            else PromptTaskCategory(str(task_category))
+        )
+        for active_tpl in self._active_by_id.values():
+            if active_tpl.task_category == cat:
+                return active_tpl
+        items = self.list_by_task(cat)
         return items[-1] if items else None
 
 

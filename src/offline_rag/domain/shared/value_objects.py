@@ -155,12 +155,26 @@ class KnowledgeScope:
 
 @dataclass(frozen=True, order=True)
 class VersionTag:
-    """4. Immutable version tag with sequence number (>= 1)."""
+    """4. Immutable version tag supporting sequence numbers (>= 1) and semantic versions (e.g. '1.0.0')."""
 
     sequence_number: int
     tag: str = ""
 
     def __post_init__(self) -> None:
+        if isinstance(self.sequence_number, str):
+            cleaned_str = self.sequence_number.strip()
+            semver_match = re.match(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$", cleaned_str)
+            if semver_match:
+                major, minor, patch = (
+                    int(semver_match.group(1)),
+                    int(semver_match.group(2)),
+                    int(semver_match.group(3)),
+                )
+                seq = max(major * 10000 + minor * 100 + patch, 1)
+                object.__setattr__(self, "sequence_number", seq)
+                object.__setattr__(self, "tag", cleaned_str)
+                return
+
         seq = _ensure_not_bool_int(self.sequence_number, "VersionTag.sequence_number")
         if seq < 1:
             raise InvalidValueObjectError(
@@ -169,18 +183,31 @@ class VersionTag:
         computed_tag = self.tag.strip() if isinstance(self.tag, str) and self.tag.strip() else f"v{seq}"
         object.__setattr__(self, "tag", computed_tag)
 
+    @property
+    def value(self) -> str:
+        return self.tag
+
     @classmethod
     def initial(cls, tag: str = "v1") -> VersionTag:
         return cls(sequence_number=1, tag=tag)
 
     @classmethod
     def from_version_id(cls, version_id: str | VersionTag) -> VersionTag:
-        """Parse a version identifier string (e.g. 'v1', 'v2', '1') or return existing VersionTag."""
+        """Parse a version identifier string (e.g. '1.0.0', '0.9.0', 'v1', 'v2') or return existing VersionTag."""
         if isinstance(version_id, VersionTag):
             return version_id
         if not isinstance(version_id, str) or not version_id.strip():
             raise InvalidValueObjectError("version_id must be a non-empty string or VersionTag.")
         cleaned = version_id.strip()
+        semver_match = re.match(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$", cleaned)
+        if semver_match:
+            major, minor, patch = (
+                int(semver_match.group(1)),
+                int(semver_match.group(2)),
+                int(semver_match.group(3)),
+            )
+            seq = max(major * 10000 + minor * 100 + patch, 1)
+            return cls(sequence_number=seq, tag=cleaned)
         m = re.search(r"(\d+)$", cleaned)
         seq = int(m.group(1)) if m and int(m.group(1)) >= 1 else 1
         return cls(sequence_number=seq, tag=cleaned)

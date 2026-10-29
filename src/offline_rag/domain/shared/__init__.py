@@ -8,6 +8,7 @@ from offline_rag.domain.shared.errors import (
     HierarchyRuleViolationError,
     InvalidValueObjectError,
     InvariantViolationError,
+    MissingPromptVariableError,
 )
 from offline_rag.domain.shared.value_objects import (
     DEFAULT_RUBRIC_CRITERIA,
@@ -45,6 +46,7 @@ __all__ = [
     "KnowledgeScope",
     "LayerIndex",
     "MetadataRecord",
+    "MissingPromptVariableError",
     "NodeIdentifier",
     "ProgressPercentage",
     "RetrievalQuery",

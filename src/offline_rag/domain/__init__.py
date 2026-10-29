@@ -39,10 +39,15 @@ from offline_rag.domain.knowledge import (
     VersionTag,
 )
 from offline_rag.domain.model_prompt import (
+    AssembledPrompt,
+    CitationPolicy,
+    ExpectedOutputFormat,
     HardwareConstraints,
     ModelRegistryRepository,
     ModelRole,
     OfflineModelSpec,
+    PromptAssembler,
+    PromptHistoryEntry,
     PromptTaskCategory,
     PromptTemplate,
     PromptTemplateRepository,
@@ -84,6 +89,7 @@ from offline_rag.domain.shared import (
     HierarchyRuleViolationError,
     InvalidValueObjectError,
     InvariantViolationError,
+    MissingPromptVariableError,
 )
 from offline_rag.domain.transfer import (
     TransferDeliveryResolution,

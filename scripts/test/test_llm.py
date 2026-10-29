@@ -1,6 +1,8 @@
 """Upgraded offline LLM diagnostic and benchmark script.
 
-Reads LLM settings from ``data/fixtures/models.yaml`` and tests:
+Reads LLM settings from ``data/fixtures/models.yaml`` and versioned prompts from
+``data/prompts/prompt_registry.yaml`` via ``YamlPromptTemplateRepository`` and ``PromptAssembler``.
+Tests:
 1. Local server connectivity (with automatic offline fallback if server is down).
 2. Time to First Token (TTFT) and token generation speed (tok/s).
 3. Structured JSON output stability across multiple runs.
@@ -9,7 +11,6 @@ Reads LLM settings from ``data/fixtures/models.yaml`` and tests:
 from __future__ import annotations
 
 import argparse
-import ast
 import json
 import sys
 import time
@@ -23,118 +24,23 @@ try:
 except ImportError:
     _requests = None
 
-try:
-    import yaml as _yaml  # type: ignore[import-not-found]
-except ImportError:
-    _yaml = None
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from offline_rag.domain.model_prompt import PromptAssembler  # noqa: E402
+from offline_rag.infrastructure.config import (  # noqa: E402
+    YamlPromptTemplateRepository,
+    load_yaml_dict,
+)
+
 DEFAULT_MODELS_YAML = REPO_ROOT / "data" / "fixtures" / "models.yaml"
-
-
-def _parse_scalar(val: str) -> Any:
-    """Parse a simple YAML scalar value using stdlib."""
-    val = val.strip()
-    if not val or val == "null" or val == "~":
-        return None
-    if val == "true":
-        return True
-    if val == "false":
-        return False
-    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
-        return val[1:-1]
-    if val.startswith("[") and val.endswith("]"):
-        try:
-            return ast.literal_eval(val)
-        except Exception:
-            return val
-    try:
-        if "." in val:
-            return float(val)
-        return int(val)
-    except ValueError:
-        return val
-
-
-def _minimal_yaml_load(text: str) -> dict[str, Any]:
-    """Fallback YAML loader for fixture files when PyYAML is not installed."""
-    root: dict[str, Any] = {}
-    current_top_list: list[Any] | None = None
-    current_item: dict[str, Any] | None = None
-    current_subkey: str | None = None
-    current_subcontainer: list[Any] | dict[str, Any] | None = None
-
-    for raw_line in text.splitlines():
-        stripped_comment = raw_line.split("#", 1)[0].rstrip()
-        if not stripped_comment.strip():
-            continue
-        indent = len(stripped_comment) - len(stripped_comment.lstrip(" "))
-        line = stripped_comment.strip()
-
-        if indent == 0:
-            current_item = None
-            current_subkey = None
-            current_subcontainer = None
-            if ":" in line:
-                k, v = line.split(":", 1)
-                k = k.strip()
-                v = v.strip()
-                if v:
-                    root[k] = _parse_scalar(v)
-                    current_top_list = None
-                else:
-                    root[k] = []
-                    current_top_list = root[k]
-        elif indent == 2:
-            if line.startswith("- ") and isinstance(current_top_list, list):
-                current_item = {}
-                current_top_list.append(current_item)
-                current_subkey = None
-                current_subcontainer = None
-                rest = line[2:].strip()
-                if ":" in rest:
-                    k, v = rest.split(":", 1)
-                    current_item[k.strip()] = _parse_scalar(v)
-            elif ":" in line and isinstance(current_top_list, list) and len(current_top_list) == 0:
-                k_top = next(reversed(root.keys()))
-                if isinstance(root[k_top], list):
-                    root[k_top] = {}
-                k, v = line.split(":", 1)
-                root[k_top][k.strip()] = _parse_scalar(v)
-        elif indent == 4 and current_item is not None:
-            if ":" in line:
-                k, v = line.split(":", 1)
-                k = k.strip()
-                v = v.strip()
-                if v:
-                    current_item[k] = _parse_scalar(v)
-                    current_subkey = None
-                    current_subcontainer = None
-                else:
-                    current_subkey = k
-                    current_subcontainer = None
-        elif indent == 6 and current_item is not None and current_subkey is not None:
-            if line.startswith("- "):
-                if not isinstance(current_subcontainer, list):
-                    current_subcontainer = []
-                    current_item[current_subkey] = current_subcontainer
-                current_subcontainer.append(_parse_scalar(line[2:]))
-            elif ":" in line:
-                if not isinstance(current_subcontainer, dict):
-                    current_subcontainer = {}
-                    current_item[current_subkey] = current_subcontainer
-                k, v = line.split(":", 1)
-                current_subcontainer[k.strip()] = _parse_scalar(v)
-
-    return root
+DEFAULT_PROMPTS_YAML = REPO_ROOT / "data" / "prompts" / "prompt_registry.yaml"
 
 
 def load_yaml_file(path: Path) -> dict[str, Any]:
-    """Load a YAML file using PyYAML if available, otherwise stdlib fallback."""
-    text = path.read_text(encoding="utf-8")
-    if _yaml is not None:
-        return _yaml.safe_load(text)
-    return _minimal_yaml_load(text)
+    """Load a YAML file using the domain/infrastructure YAML loader."""
+    return load_yaml_dict(path)
 
 
 def _http_get_json(url: str, timeout: float = 3.0) -> dict[str, Any]:
@@ -179,7 +85,15 @@ def load_llm_config(config_path: Path = DEFAULT_MODELS_YAML) -> dict[str, Any]:
     raise ValueError(f"No model with role='llm' found in {config_path}")
 
 
-def resolve_active_model_name(endpoint: str, configured_model_id: str, timeout: float = 2.5) -> tuple[str, bool]:
+def build_prompt_assembler(prompts_path: Path = DEFAULT_PROMPTS_YAML) -> PromptAssembler:
+    """Create a PromptAssembler backed by YamlPromptTemplateRepository."""
+    repo = YamlPromptTemplateRepository(prompts_path=prompts_path)
+    return PromptAssembler(repository=repo)
+
+
+def resolve_active_model_name(
+    endpoint: str, configured_model_id: str, timeout: float = 2.5
+) -> tuple[str, bool]:
     """Check local server connectivity and return (active_model_id, is_live)."""
     try:
         body = _http_get_json(f"{endpoint.rstrip('/')}/models", timeout=timeout)
@@ -202,14 +116,22 @@ def measure_generation_run(
     max_tokens: int,
     temperature: float,
     is_live: bool,
+    system_prompt: str = "",
     timeout: float = 30.0,
 ) -> dict[str, Any]:
     """Measure TTFT (ms) and generation speed (tok/s) for a single LLM run."""
     if not is_live:
         start = time.perf_counter()
-        simulated_text = (
-            "مدیریت دانش سازمانی در ساختار سلسله‌مراتبی آفلاین موجب حفظ تجربیات فنی، "
-            "ردیابی مسائل کلیدی و انتقال خلاصه‌های تصمیم‌ساز به لایه‌های مدیریتی می‌شود."
+        simulated_text = json.dumps(
+            {
+                "answer": (
+                    "مدیریت دانش سازمانی در ساختار سلسله‌مراتبی آفلاین موجب حفظ تجربیات فنی، "
+                    "ردیابی مسائل کلیدی و انتقال خلاصه‌های تصمیم‌ساز به لایه‌های مدیریتی می‌شود."
+                ),
+                "source_references": ["DOC-N300-01#p1"],
+                "uncertainty_declared": False,
+            },
+            ensure_ascii=False,
         )
         ttft_ms = 42.5
         elapsed = max(time.perf_counter() - start, 0.05)
@@ -224,9 +146,13 @@ def measure_generation_run(
         }
 
     url = f"{endpoint.rstrip('/')}/chat/completions"
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
     payload = {
         "model": model_name,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
         "stream": False,
@@ -254,17 +180,22 @@ def test_structured_json_stability(
     is_live: bool,
     runs: int = 3,
     timeout: float = 30.0,
+    prompts_path: Path = DEFAULT_PROMPTS_YAML,
+    prompt_version: str = "1.0.0",
 ) -> dict[str, Any]:
-    """Test LLM structured JSON output stability across multiple runs."""
-    required_keys = {"node_id", "detail_level", "key_achievements", "unresolved_issues", "source_references"}
-    system_prompt = (
-        "تو یک دستیار هوشمند در هسته RAG سلسله‌مراتبی آفلاین هستی. "
-        "پاسخ را فقط و فقط در قالب یک شیء JSON معتبر بدون هیچ متن اضافی یا بلاک مارک‌داون برگردان."
+    """Test LLM structured JSON output stability using versioned prompt from prompt_registry.yaml."""
+    assembler = build_prompt_assembler(prompts_path)
+    assembled = assembler.assemble(
+        prompt_id="PRM-TRANSFER-PREP",
+        version=prompt_version,
+        variables={
+            "node_id": "N-300",
+            "detail_level": "technical_summary",
+            "required_fields": "node_id, detail_level, key_achievements, unresolved_issues, source_references",
+            "draft_payload": "[DOC-N300-01#p2] پیاده‌سازی خط لوله خردسازی اسناد؛ چالش باز: تنظیم آستانه هم‌پوشانی.",
+        },
     )
-    user_prompt = (
-        "بر اساس گزارش گره N-300 با سطح جزئیات technical_summary، یک خروجی JSON شامل کلیدهای "
-        "node_id، detail_level، key_achievements (آرایه)، unresolved_issues (آرایه) و source_references (آرایه) تولید کن."
-    )
+    required_keys = set(assembled.expected_output_format.required_keys)
 
     valid_runs = 0
     schema_compliant_runs = 0
@@ -288,10 +219,7 @@ def test_structured_json_stability(
                     f"{endpoint.rstrip('/')}/chat/completions",
                     {
                         "model": model_name,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
+                        "messages": assembled.to_messages(),
                         "max_tokens": 300,
                         "temperature": temperature,
                     },
@@ -317,6 +245,8 @@ def test_structured_json_stability(
             continue
 
     return {
+        "prompt_id": assembled.prompt_id,
+        "prompt_version": str(assembled.version),
         "total_runs": runs,
         "valid_json_runs": valid_runs,
         "schema_compliant_runs": schema_compliant_runs,
@@ -329,12 +259,24 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
-    parser = argparse.ArgumentParser(description="Test offline LLM from models.yaml registry.")
+    parser = argparse.ArgumentParser(description="Test offline LLM from models.yaml and prompt_registry.yaml.")
     parser.add_argument(
         "--config",
         type=Path,
         default=DEFAULT_MODELS_YAML,
         help="Path to data/fixtures/models.yaml",
+    )
+    parser.add_argument(
+        "--prompts",
+        type=Path,
+        default=DEFAULT_PROMPTS_YAML,
+        help="Path to data/prompts/prompt_registry.yaml",
+    )
+    parser.add_argument(
+        "--prompt-version",
+        type=str,
+        default="1.0.0",
+        help="Explicit prompt version to assemble from prompt_registry.yaml",
     )
     parser.add_argument("--runs", type=int, default=3, help="Number of benchmark iterations")
     args = parser.parse_args(argv)
@@ -345,18 +287,30 @@ def main(argv: list[str] | None = None) -> int:
     max_tokens = min(int(llm_cfg.get("maxOutputTokens", 200)), 200)
     temperature = float(llm_cfg.get("temperatureDefault", 0.0))
 
+    assembler = build_prompt_assembler(args.prompts)
+    qa_prompt = assembler.assemble(
+        prompt_id="PRM-QA",
+        version=args.prompt_version,
+        variables={
+            "node_scope": "N-300",
+            "context": "[DOC-N300-01#p1] مدیریت دانش در گره‌های سلسله‌مراتبی آفلاین با حفظ منبع انجام می‌شود.",
+            "query": "نقش مدیریت دانش سازمانی در ساختار سلسله‌مراتبی آفلاین چیست؟",
+        },
+    )
+
     active_model, is_live = resolve_active_model_name(endpoint, configured_id)
     status_label = "ONLINE (Local Server)" if is_live else "OFFLINE (Deterministic Fallback)"
-    print(f"[LLM Registry] modelId={configured_id} | activeModel={active_model} | status={status_label}")
-    print(f"[LLM Config]   endpoint={endpoint} | contextWindow={llm_cfg['contextWindow']} | temp={temperature}")
+    print(f"[LLM Registry]    modelId={configured_id} | activeModel={active_model} | status={status_label}")
+    print(f"[Prompt Registry] promptId={qa_prompt.prompt_id} | version={qa_prompt.version} | rubric={qa_prompt.judge_rubric_id}")
+    print(f"[LLM Config]      endpoint={endpoint} | contextWindow={llm_cfg['contextWindow']} | temp={temperature}")
 
-    prompt = "یک پاراگراف کوتاه درباره مدیریت دانش سازمانی در ساختار سلسله‌مراتبی بنویس."
     run_metrics: list[dict[str, Any]] = []
     for idx in range(args.runs):
         metrics = measure_generation_run(
             endpoint=endpoint,
             model_name=active_model,
-            prompt=prompt,
+            prompt=qa_prompt.user_message,
+            system_prompt=qa_prompt.system_message,
             max_tokens=max_tokens,
             temperature=temperature,
             is_live=is_live,
@@ -375,9 +329,12 @@ def main(argv: list[str] | None = None) -> int:
         temperature=temperature,
         is_live=is_live,
         runs=args.runs,
+        prompts_path=args.prompts,
+        prompt_version=args.prompt_version,
     )
     print(
-        f"[JSON Stability] valid={json_stability['valid_json_runs']}/{json_stability['total_runs']} | "
+        f"[JSON Stability] prompt={json_stability['prompt_id']}@{json_stability['prompt_version']} | "
+        f"valid={json_stability['valid_json_runs']}/{json_stability['total_runs']} | "
         f"schema_compliant={json_stability['schema_compliant_runs']}/{json_stability['total_runs']} | "
         f"rate={json_stability['stability_rate'] * 100:.0f}%"
     )
