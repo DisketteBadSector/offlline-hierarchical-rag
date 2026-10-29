@@ -1,2 +1,37 @@
+# Project specific scripts and docs
 RepoDoc.sh
 code-doc.md
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Packaging and build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Temporary local database files
+*.db
+*.sqlite3
+*.sqlite3-journal
+*.db-journal
+
+# Local offline model weights (kept outside git)
+models/weights/
+*.gguf
+*.safetensors
+*.bin

@@ -1,11 +1,12 @@
-# TODO: complete it in phase 14
+# قواعد انتقال دانش بین لایه‌های سازمانی (فاز ۱ - نهایی‌شده در فاز ۱۴)
 
-version: "0.1.1-phase1"
+version: "0.1.2-phase1"
 last_updated: "2026-10-29"
 
 maxLengthUnit: "characters"
 layer_transfer_rules:
   - targetLayerIndex: 0
+    usageScope: "upward_transfer"
     detailLevel: "executive_high"
     requiredFields:
       - "key_achievements"
@@ -16,6 +17,7 @@ layer_transfer_rules:
     minJudgeScore: 18
 
   - targetLayerIndex: 1
+    usageScope: "upward_transfer"
     detailLevel: "managerial"
     requiredFields:
       - "project_status"
@@ -27,6 +29,7 @@ layer_transfer_rules:
     minJudgeScore: 18
 
   - targetLayerIndex: 2
+    usageScope: "upward_transfer"
     detailLevel: "technical_summary"
     requiredFields:
       - "methods"
@@ -35,9 +38,12 @@ layer_transfer_rules:
       - "executor_capabilities"
     maxLength: 8000
     minJudgeScore: 18
-  # TODO(phase 6/11): گیرنده این قاعده روشن نیست؛ لایه ۴ منبع دانش است و بسته دریافت نمی‌کند.
-  # یا برای درخواست فنی تفصیلی داخل لایه ۳ استفاده شود، یا حذف شود.
+
+  # لایه ۴ صرفاً منبع دانش است (KNOWLEDGE_SOURCE) و بسته انتقال به بالا ارسال نمی‌کند (طبق R-08).
+  # بنابراین قاعده targetLayerIndex: 3 برای گزارش‌های فنی تفصیلی درون‌لایه ۳ یا ممیزی فنی استفاده می‌شود
+  # و با قاعده R-07 در nodes.yaml تعارضی ندارد.
   - targetLayerIndex: 3
+    usageScope: "intra_layer_or_audit"
     detailLevel: "technical_detailed"
     requiredFields:
       - "full_issue_details"
