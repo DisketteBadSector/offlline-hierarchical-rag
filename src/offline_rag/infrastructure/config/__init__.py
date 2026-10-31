@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import ast
-import json
 from pathlib import Path
 from typing import Any, Sequence
+
+import yaml
 
 from offline_rag.domain.model_prompt import (
     CitationPolicy,
@@ -36,225 +36,15 @@ from offline_rag.domain.shared.value_objects import (
 )
 from offline_rag.infrastructure.persistence.in_memory import InMemoryUnitOfWork
 
-try:
-    import yaml as _yaml  # type: ignore[import-not-found]
-except ImportError:
-    _yaml = None
-
-
-def _strip_yaml_comment(raw_line: str) -> str:
-    """Strip YAML comments (# ...) only when outside single or double quotes."""
-    in_single = False
-    in_double = False
-    escaped = False
-    for idx, ch in enumerate(raw_line):
-        if escaped:
-            escaped = False
-            continue
-        if ch == "\\":
-            escaped = True
-            continue
-        if ch == "'" and not in_double:
-            in_single = not in_single
-        elif ch == '"' and not in_single:
-            in_double = not in_double
-        elif ch == "#" and not in_single and not in_double:
-            if idx == 0 or raw_line[idx - 1].isspace():
-                return raw_line[:idx].rstrip()
-    return raw_line.rstrip()
-
-
-def _split_key_value(line: str) -> tuple[str, str] | None:
-    """Split a YAML 'key: value' line on the first colon outside quotes."""
-    in_single = False
-    in_double = False
-    escaped = False
-    for idx, ch in enumerate(line):
-        if escaped:
-            escaped = False
-            continue
-        if ch == "\\":
-            escaped = True
-            continue
-        if ch == "'" and not in_double:
-            in_single = not in_single
-        elif ch == '"' and not in_single:
-            in_double = not in_double
-        elif ch == ":" and not in_single and not in_double:
-            if idx == len(line) - 1 or line[idx + 1] == " ":
-                return line[:idx].strip(), line[idx + 1 :].strip()
-    return None
-
-
-def _parse_scalar(val: str) -> Any:
-    val = val.strip()
-    if not val or val in ("null", "~"):
-        return None
-    if val == "true":
-        return True
-    if val == "false":
-        return False
-    if val.startswith('"') and val.endswith('"'):
-        inner = val[1:-1]
-        return inner.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
-    if val.startswith("'") and val.endswith("'"):
-        return val[1:-1]
-    if val.startswith("[") and val.endswith("]"):
-        try:
-            return ast.literal_eval(val)
-        except Exception:
-            return val
-    try:
-        if "." in val and all(part.lstrip("-").isdigit() for part in val.split(".", 1)):
-            return float(val)
-        return int(val)
-    except ValueError:
-        return val
-
-
-def _parse_yaml_block(
-    lines: list[tuple[int, str]], start_idx: int, block_indent: int
-) -> tuple[Any, int]:
-    """Recursively parse indented YAML lines into nested dicts and lists."""
-    if start_idx >= len(lines):
-        return {}, start_idx
-
-    first_indent, first_text = lines[start_idx]
-    if first_text == "-" or first_text.startswith("- "):
-        result_list: list[Any] = []
-        idx = start_idx
-        while idx < len(lines):
-            cur_indent, cur_text = lines[idx]
-            if cur_indent != first_indent or not (
-                cur_text == "-" or cur_text.startswith("- ")
-            ):
-                break
-            rest = cur_text[1:].strip()
-            idx += 1
-            if not rest:
-                if idx < len(lines) and lines[idx][0] > first_indent:
-                    sub_val, idx = _parse_yaml_block(lines, idx, lines[idx][0])
-                    result_list.append(sub_val)
-                else:
-                    result_list.append(None)
-                continue
-
-            kv = _split_key_value(rest)
-            if kv is not None:
-                k, v = kv
-                item_dict: dict[str, Any] = {}
-                if v != "":
-                    item_dict[k] = _parse_scalar(v)
-                else:
-                    if idx < len(lines) and lines[idx][0] > first_indent:
-                        sub_val, idx = _parse_yaml_block(lines, idx, lines[idx][0])
-                        item_dict[k] = sub_val
-                    else:
-                        item_dict[k] = None
-
-                if idx < len(lines) and lines[idx][0] > first_indent:
-                    extra_val, idx = _parse_yaml_block(lines, idx, lines[idx][0])
-                    if isinstance(extra_val, dict):
-                        item_dict.update(extra_val)
-                result_list.append(item_dict)
-            else:
-                result_list.append(_parse_scalar(rest))
-        return result_list, idx
-
-    result_dict: dict[str, Any] = {}
-    idx = start_idx
-    while idx < len(lines):
-        cur_indent, cur_text = lines[idx]
-        if cur_indent < first_indent:
-            break
-        if cur_indent != first_indent or cur_text == "-" or cur_text.startswith("- "):
-            break
-        kv = _split_key_value(cur_text)
-        idx += 1
-        if kv is None:
-            continue
-        k, v = kv
-        if v != "":
-            result_dict[k] = _parse_scalar(v)
-        else:
-            if idx < len(lines) and lines[idx][0] > first_indent:
-                sub_val, idx = _parse_yaml_block(lines, idx, lines[idx][0])
-                result_dict[k] = sub_val
-            else:
-                result_dict[k] = None
-    return result_dict, idx
-
-
-def _fold_block_scalars(raw_lines: list[str]) -> list[str]:
-    """Convert YAML literal/folded block scalars (``key: |`` / ``|-`` / ``>``) into single-line quoted scalars."""
-    out: list[str] = []
-    idx = 0
-    while idx < len(raw_lines):
-        line = raw_lines[idx]
-        stripped = _strip_yaml_comment(line)
-        indicator = stripped.rstrip()[-2:].strip() if stripped.rstrip() else ""
-        is_block = stripped.rstrip().endswith((": |", ": |-", ": >", ": >-")) or (
-            stripped.lstrip().startswith("- ") and indicator in ("|", "|-")
-            and stripped.rstrip().endswith((": |", ": |-"))
-        )
-        if not is_block:
-            out.append(line)
-            idx += 1
-            continue
-        head = stripped.rstrip()
-        style = head.rsplit(":", 1)[1].strip()
-        key_part = head.rsplit(":", 1)[0]
-        base_indent = len(head) - len(head.lstrip(" "))
-        if head.lstrip().startswith("- "):
-            base_indent += 2
-        idx += 1
-        body: list[str] = []
-        while idx < len(raw_lines):
-            nxt = raw_lines[idx]
-            if nxt.strip() and (len(nxt) - len(nxt.lstrip(" "))) <= base_indent:
-                break
-            body.append(nxt)
-            idx += 1
-        while body and not body[-1].strip():
-            body.pop()
-        content_lines = [b for b in body if b.strip()]
-        min_ind = min((len(b) - len(b.lstrip(" ")) for b in content_lines), default=0)
-        dedented = [b[min_ind:] if b.strip() else "" for b in body]
-        if style.startswith(">"):
-            value = " ".join(d.strip() for d in dedented if d.strip())
-        else:
-            value = "\n".join(dedented)
-        if not style.endswith("-"):
-            value += "\n"
-        out.append(f"{key_part}: {json.dumps(value, ensure_ascii=False)}")
-    return out
-
 
 def load_yaml_dict(path: Path) -> dict[str, Any]:
-    """Load a YAML file into a Python dict using PyYAML or built-in recursive indentation parser."""
+    """Load a YAML file into a Python dict using PyYAML."""
     if not path.exists():
         raise FileNotFoundError(f"YAML fixture file not found: {path}")
-    text = path.read_text(encoding="utf-8")
-    if _yaml is not None:
-        data = _yaml.safe_load(text)
-        if not isinstance(data, dict):
-            raise DomainValidationError(f"Expected mapping root in {path}")
-        return data
-
-    prepared_lines: list[tuple[int, str]] = []
-    for raw_line in _fold_block_scalars(text.splitlines()):
-        cleaned = _strip_yaml_comment(raw_line)
-        if not cleaned.strip():
-            continue
-        indent = len(cleaned) - len(cleaned.lstrip(" "))
-        prepared_lines.append((indent, cleaned.strip()))
-
-    if not prepared_lines:
-        return {}
-    parsed, _ = _parse_yaml_block(prepared_lines, 0, prepared_lines[0][0])
-    if not isinstance(parsed, dict):
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
         raise DomainValidationError(f"Expected mapping root in {path}")
-    return parsed
+    return data
 
 
 PROMPT_CATEGORY_FILES: tuple[str, ...] = (

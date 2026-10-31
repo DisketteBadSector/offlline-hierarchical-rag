@@ -1,10 +1,18 @@
-"""Unit tests for DocumentIngestionService across real DOC, DOCX, and PDF sample documents and LVM hook."""
+"""Unit tests for Docling-based DocumentIngestionService across real DOC, DOCX, and PDF sample documents and LVM hook."""
 
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 
+import pypdfium2 as pdfium
 import pytest
+from docling.datamodel.base_models import InputFormat
+from docling.document_converter import (
+    NativePdfFormatOption,
+    PdfFormatOption,
+    WordFormatOption,
+)
 
 from offline_rag.application.services import DocumentIngestionService
 from offline_rag.domain.knowledge import (
@@ -25,6 +33,7 @@ from offline_rag.infrastructure import (
     InMemoryVectorIndex,
     MockLvmLayoutAdapter,
 )
+from offline_rag.infrastructure.ingestion import build_offline_docling_converter
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES_DIR = REPO_ROOT / "data" / "fixtures"
@@ -41,6 +50,25 @@ def _make_metadata(node_str: str, doc_type: str, confidentiality: str = "interna
         active_version_id="v1",
         author_or_owner="تیم پروژه",
     )
+
+
+def test_build_offline_docling_converter_follows_best_practices() -> None:
+    """Verify real Docling converter caching and offline pipeline options."""
+    build_offline_docling_converter.cache_clear()
+    conv1 = build_offline_docling_converter()
+    conv2 = build_offline_docling_converter()
+    assert conv1 is conv2
+    assert isinstance(conv1.format_to_options[InputFormat.PDF], NativePdfFormatOption)
+    assert isinstance(conv1.format_to_options[InputFormat.DOCX], WordFormatOption)
+    assert conv1.format_to_options[InputFormat.PDF].pipeline_options.enable_remote_services is False
+
+    conv_with_artifacts = build_offline_docling_converter("models/weights/docling")
+    pdf_opt = conv_with_artifacts.format_to_options[InputFormat.PDF]
+    assert isinstance(pdf_opt, PdfFormatOption)
+    assert pdf_opt.pipeline_options.do_ocr is False
+    assert pdf_opt.pipeline_options.do_table_structure is True
+    assert pdf_opt.pipeline_options.enable_remote_services is False
+    assert pdf_opt.pipeline_options.artifacts_path == Path("models/weights/docling")
 
 
 def test_ingest_real_docx_sample_documents_preserves_headings_and_tables() -> None:
@@ -75,7 +103,6 @@ def test_ingest_real_docx_sample_documents_preserves_headings_and_tables() -> No
         assert res.storage_uri is not None and res.storage_uri.startswith("memory://")
         assert any(len(c.source_reference.heading_path) >= 1 for c in res.chunks)
 
-    # Specifically verify managerial-report-parent-org-a.docx extracted its table
     mgr_res = service.ingest_file(
         file_path=SAMPLE_DOCS_DIR / "docx" / "managerial-report-parent-org-a.docx",
         owner_node_id=NodeIdentifier("N-100"),
@@ -118,7 +145,6 @@ def test_ingest_real_pdf_sample_documents_preserves_page_numbers_and_invokes_lvm
         lvm_assistant=lvm_mock,
     )
 
-    # 1. Multi-page PDF: versioning-and-confidentiality-policy.pdf (2 pages)
     policy_pdf = SAMPLE_DOCS_DIR / "pdf" / "versioning-and-confidentiality-policy.pdf"
     res_policy = service.ingest_file(
         file_path=policy_pdf,
@@ -131,7 +157,6 @@ def test_ingest_real_pdf_sample_documents_preserves_page_numbers_and_invokes_lvm
     chunk_pages = {c.source_reference.page_number for c in res_policy.chunks}
     assert 1 in chunk_pages and 2 in chunk_pages
 
-    # 2. Research notes PDF: research-notes-small-model-team-t.pdf
     notes_pdf = SAMPLE_DOCS_DIR / "pdf" / "research-notes-small-model-team-t.pdf"
     res_notes = service.ingest_file(
         file_path=notes_pdf,
@@ -154,17 +179,14 @@ def test_scanned_or_low_text_pdf_is_flagged_and_enriched_by_mock_lvm_adapter() -
         lvm_assistant=lvm_mock,
     )
 
-    # Minimal valid PDF with an image XObject and zero text (simulating scanned S-09 PDF)
-    scanned_pdf_bytes = (
-        b"%PDF-1.4\n"
-        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
-        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
-        b"3 0 obj << /Type /Page /Parent 2 0 R /Resources << /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >> endobj\n"
-        b"4 0 obj << /Type /XObject /Subtype /Image /Width 100 /Height 100 >> endobj\n"
-        b"5 0 obj << /Length 12 >>\nstream\nq /Im1 Do Q\nendstream\nendobj\n%%EOF"
-    )
+    pdf = pdfium.PdfDocument.new()
+    pdf.new_page(200, 200)
+    buf = BytesIO()
+    pdf.save(buf)
+    pdf.close()
+
     res = service.ingest_bytes(
-        raw_bytes=scanned_pdf_bytes,
+        raw_bytes=buf.getvalue(),
         file_extension_or_format="pdf",
         document_id="S-09-SCANNED",
         title="سند اسکن‌شده نمونه S-09",
@@ -192,7 +214,6 @@ def test_ingestion_service_rejects_unknown_node_or_confidentiality_violation() -
             metadata=_make_metadata("N-999", "doc"),
         )
 
-    # N-200 has confidentiality='internal'; ingesting 'confidential' with strict check fails
     with pytest.raises(InvariantViolationError):
         service.ingest_bytes(
             raw_bytes="گزارش محرمانه تست".encode("utf-8"),

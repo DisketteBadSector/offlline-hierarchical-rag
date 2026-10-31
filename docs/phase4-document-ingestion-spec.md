@@ -88,17 +88,14 @@
                       +-----------------------------------+
 ```
 
-1. **[`DocxExtractorAdapter`](file:///d:/git2/offlline-hierarchical-rag/src/offline_rag/infrastructure/ingestion/__init__.py#L101-L221):**
-   - استخراج ساختاریافته پاراگراف‌ها (`w:p`) و جداول (`w:tbl`) از فایل‌های `.docx` فارسی و انگلیسی.
-   - تشخیص خودکار استایل‌های سرفصل (`Heading 1..6`، `Title`، `Subtitle` و سرفصل‌های شماره‌دار فارسی) و نگهداری پشته سلسله‌مراتبی `heading_path`.
-   - تبدیل جداول به اشیاء `ExtractedTable` و بلوک‌های متنی جدول با حفظ مسیر سرفصل بالای جدول.
-2. **[`PdfExtractorAdapter`](file:///d:/git2/offlline-hierarchical-rag/src/offline_rag/infrastructure/ingestion/__init__.py#L224-L441):**
-   - استخراج متن تفکیک‌شده به ازای هر صفحه با حفظ دقیق `page_number` (`1..N`).
-   - پشتیبانی بومی و آفلاین از جداول نگاشت فونت `/ToUnicode` (`beginbfchar`/`beginbfrange`)، تگ‌های `/ActualText` و بلوک‌های `/ReversedChars` برای بازسازی دقیق متون فارسی راست‌به‌چپ.
-   - تشخیص خودکار صفحات اسکن‌شده، کم‌متن یا حاوی اشیاء تصویری (`/Image` / `/XObject`) و فعال‌سازی پرچم `requires_lvm_assistance = True` به همراه ثبت صفحات در `flagged_lvm_pages`.
-3. **[`DocExtractorAdapter`](file:///d:/git2/offlline-hierarchical-rag/src/offline_rag/infrastructure/ingestion/__init__.py#L444-L553):**
-   - پشتیبانی چندراهبردی از فایل‌های قدیمی `.doc` شامل استخراج جریان‌های متنی `UTF-16LE` از ساختار باینری `OLE2` (با حذف نویز استایل‌های باینری Word) و بازگشایی مستقیم جریان‌های متنی `UTF-8`/`UTF-16`/`CP1256` بدون هیچ وابستگی به اینترنت یا سرویس خارجی.
-4. **[`LvmLayoutAssistantPort`](file:///d:/git2/offlline-hierarchical-rag/src/offline_rag/application/ports/__init__.py#L75-L89) و [`MockLvmLayoutAdapter`](file:///d:/git2/offlline-hierarchical-rag/src/offline_rag/infrastructure/ingestion/__init__.py#L556-L598):**
+1. **[`build_offline_docling_converter`](file:///d:/git2/offlline-hierarchical-rag/src/offline_rag/infrastructure/ingestion/__init__.py#L38-L77) و پایه مشترک [`_DoclingExtractorBase`](file:///d:/git2/offlline-hierarchical-rag/src/offline_rag/infrastructure/ingestion/__init__.py#L220-L289):**
+   - استفاده از یک نمونه کش‌شده (`@lru_cache`) از `DocumentConverter` کتابخانه `docling` با تنظیمات `PdfPipelineOptions(do_ocr=False, do_table_structure=True, generate_page_images=False)` و مسیر وزن‌های آفلاین (`artifacts_path`).
+   - تبدیل جریان بایت در حافظه از طریق `DocumentStream` بدون نیاز به فایل موقت و پیمایش `doc.iterate_items()` برای استخراج سرفصل‌ها (`title`/`section_header`)، پاراگراف‌ها، جداول (`table.data.grid`) و شماره صفحات (`prov[0].page_no`).
+2. **[`DocxExtractorAdapter`](file:///d:/git2/offlline-hierarchical-rag/src/offline_rag/infrastructure/ingestion/__init__.py#L292-L297) و [`DocExtractorAdapter`](file:///d:/git2/offlline-hierarchical-rag/src/offline_rag/infrastructure/ingestion/__init__.py#L308-L313):**
+   - استخراج ساختاریافته پاراگراف‌ها، سلسله‌مراتب `heading_path` و جداول از اسناد Word از طریق `WordFormatOption` در Docling.
+3. **[`PdfExtractorAdapter`](file:///d:/git2/offlline-hierarchical-rag/src/offline_rag/infrastructure/ingestion/__init__.py#L300-L305):**
+   - استخراج بلوک‌ها و جداول تفکیک‌شده به ازای هر صفحه با `PdfFormatOption` در Docling و علامت‌گذاری خودکار صفحات تصویری (`picture`/`figure`) یا کم‌متن در `flagged_lvm_pages` (`requires_lvm_assistance = True`).
+4. **[`LvmLayoutAssistantPort`](file:///d:/git2/offlline-hierarchical-rag/src/offline_rag/application/ports/__init__.py#L75-L89) و [`MockLvmLayoutAdapter`](file:///d:/git2/offlline-hierarchical-rag/src/offline_rag/infrastructure/ingestion/__init__.py#L316-L364):**
    - دریافت اسناد و صفحات علامت‌گذاری‌شده (`requires_lvm_assistance=True`)، تولید توصیف ساختاریافته بصری/چیدمان برای هر صفحه و پیوست کردن آن هم به بلوک‌های استخراج‌شده (`block_type="lvm_layout"`) و هم به فیلد `lvm_extracted_notes` در موجودیت `KnowledgeItem`.
 
 ---
