@@ -133,7 +133,7 @@ def main(file_path: str) -> int:
         ch if (ch.isalnum() or ch in "-_.") else "-"
         for ch in extracted.document_id
     ).strip("-") or "document"
-    out_path = REPO_ROOT / f"temp/docling-output-{safe_name}-{timestamp}.json"
+    out_path = REPO_ROOT / f"temp/docling-outputs/doc-{safe_name}-{timestamp}.json"
     _dump_json(extracted, out_path)
     print(f"\nFull JSON output written to: {out_path}")
     return 0
