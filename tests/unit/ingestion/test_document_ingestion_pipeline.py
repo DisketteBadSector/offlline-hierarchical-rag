@@ -8,6 +8,7 @@ from pathlib import Path
 import pypdfium2 as pdfium
 import pytest
 from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import (
     NativePdfFormatOption,
     PdfFormatOption,
@@ -60,11 +61,16 @@ def test_build_offline_docling_converter_follows_best_practices() -> None:
     assert conv1 is conv2
     assert isinstance(conv1.format_to_options[InputFormat.PDF], NativePdfFormatOption)
     assert isinstance(conv1.format_to_options[InputFormat.DOCX], WordFormatOption)
-    assert conv1.format_to_options[InputFormat.PDF].pipeline_options.enable_remote_services is False
+
+    pdf_opt_native = conv1.format_to_options[InputFormat.PDF]
+    if pdf_opt_native.pipeline_options is not None:
+        assert pdf_opt_native.pipeline_options.enable_remote_services is False
 
     conv_with_artifacts = build_offline_docling_converter("models/weights/docling")
     pdf_opt = conv_with_artifacts.format_to_options[InputFormat.PDF]
     assert isinstance(pdf_opt, PdfFormatOption)
+    assert pdf_opt.pipeline_options is not None
+    assert isinstance(pdf_opt.pipeline_options, PdfPipelineOptions)
     assert pdf_opt.pipeline_options.do_ocr is False
     assert pdf_opt.pipeline_options.do_table_structure is True
     assert pdf_opt.pipeline_options.enable_remote_services is False

@@ -35,3 +35,6 @@ models/weights/
 *.gguf
 *.safetensors
 *.bin
+
+# Temporary export files
+temp/
