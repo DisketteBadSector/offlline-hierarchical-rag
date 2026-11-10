@@ -7,6 +7,12 @@ from offline_rag.domain.knowledge.chunking import (
     ExtractedTable,
     KnowledgeChunker,
 )
+from offline_rag.domain.knowledge.deduplication import (
+    DuplicateDetectionResult,
+    DuplicateKind,
+    DuplicateMatch,
+    ExactDuplicateDetector,
+)
 from offline_rag.domain.knowledge.entities import (
     DocumentFormat,
     KnowledgeChunk,
@@ -21,6 +27,10 @@ from offline_rag.domain.shared.value_objects import KnowledgeScope, MetadataReco
 __all__ = [
     "ChunkingPolicy",
     "DocumentFormat",
+    "DuplicateDetectionResult",
+    "DuplicateKind",
+    "DuplicateMatch",
+    "ExactDuplicateDetector",
     "ExtractedBlock",
     "ExtractedDocumentContent",
     "ExtractedTable",

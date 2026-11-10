@@ -1,4 +1,12 @@
-"""Document Ingestion Application Service (Phase 4 - Section 7.2, 7.3, 7.4, 7.5)."""
+"""Document Ingestion Application Service (Phase 4 - Section 7.2, 7.3, 7.4, 7.5).
+
+Phase 5 integration: optional exact/near-duplicate and overlap detection runs
+between chunking and persistence. Behavior is controlled by ``deduplication_policy``:
+
+- ``"allow"``  : no duplicate check is performed.
+- ``"warn"``   : detection is executed; findings are returned in the result.
+- ``"reject"`` : detection is executed; any finding raises ``InvariantViolationError``.
+"""
 
 from __future__ import annotations
 
@@ -12,9 +20,13 @@ from offline_rag.application.ports import (
     UnitOfWork,
     VectorIndexPort,
 )
+from offline_rag.application.services.knowledge_deduplication_service import (
+    KnowledgeDeduplicationService,
+)
 from offline_rag.domain.knowledge import (
     ChunkingPolicy,
     DocumentFormat,
+    DuplicateDetectionResult,
     ExtractedDocumentContent,
     KnowledgeChunk,
     KnowledgeChunker,
@@ -34,6 +46,8 @@ from offline_rag.domain.shared.value_objects import (
 )
 from offline_rag.infrastructure.ingestion import DocumentExtractorRegistry
 
+VALID_DEDUPLICATION_POLICIES: tuple[str, ...] = ("allow", "warn", "reject")
+
 
 @dataclass(frozen=True)
 class DocumentIngestionResult:
@@ -45,6 +59,7 @@ class DocumentIngestionResult:
     extracted_content: ExtractedDocumentContent
     lvm_assisted: bool
     storage_uri: str | None = None
+    duplicate_detection: DuplicateDetectionResult | None = None
 
 
 class DocumentIngestionService:
@@ -59,6 +74,7 @@ class DocumentIngestionService:
         document_storage: DocumentStoragePort | None = None,
         vector_index: VectorIndexPort | None = None,
         embedding_port: EmbeddingModelPort | None = None,
+        deduplication_service: KnowledgeDeduplicationService | None = None,
     ) -> None:
         self._uow = uow
         self._extractor_registry = extractor_registry or DocumentExtractorRegistry()
@@ -67,6 +83,11 @@ class DocumentIngestionService:
         self._document_storage = document_storage
         self._vector_index = vector_index
         self._embedding_port = embedding_port
+        self._deduplication_service = deduplication_service
+
+    @property
+    def deduplication_service(self) -> KnowledgeDeduplicationService | None:
+        return self._deduplication_service
 
     def ingest_file(
         self,
@@ -77,6 +98,7 @@ class DocumentIngestionService:
         title: str | None = None,
         force_lvm_assistance: bool = False,
         enforce_strict_node_confidentiality: bool = False,
+        deduplication_policy: str = "allow",
     ) -> DocumentIngestionResult:
         """Ingest a local DOC, DOCX, or PDF file into a controlled KnowledgeItem, Version, and Chunks."""
         path = Path(file_path)
@@ -97,6 +119,7 @@ class DocumentIngestionService:
             source_path=str(path),
             force_lvm_assistance=force_lvm_assistance,
             enforce_strict_node_confidentiality=enforce_strict_node_confidentiality,
+            deduplication_policy=deduplication_policy,
         )
 
     def ingest_bytes(
@@ -110,12 +133,18 @@ class DocumentIngestionService:
         source_path: str | None = None,
         force_lvm_assistance: bool = False,
         enforce_strict_node_confidentiality: bool = False,
+        deduplication_policy: str = "allow",
     ) -> DocumentIngestionResult:
         """Ingest raw document bytes (DOC, DOCX, or PDF) and persist KnowledgeItem + KnowledgeChunks."""
         if not isinstance(owner_node_id, NodeIdentifier):
             raise DomainValidationError("owner_node_id must be a NodeIdentifier.")
         if not isinstance(metadata, MetadataRecord):
             raise DomainValidationError("metadata must be a MetadataRecord.")
+        if deduplication_policy not in VALID_DEDUPLICATION_POLICIES:
+            raise DomainValidationError(
+                f"Invalid deduplication_policy '{deduplication_policy}'. "
+                f"Allowed: {VALID_DEDUPLICATION_POLICIES}"
+            )
 
         # 1. Validate owner Node existence and confidentiality alignment
         node = self._uow.nodes.get_by_id(owner_node_id)
@@ -164,7 +193,23 @@ class DocumentIngestionService:
             inherited_metadata=metadata,
         )
 
-        # 5. Create KnowledgeItem and initial KnowledgeVersion (v1)
+        # 5. Optional Phase-5 duplicate/overlap detection
+        dedup_result: DuplicateDetectionResult | None = None
+        if deduplication_policy != "allow" and self._deduplication_service is not None:
+            dedup_result = self._deduplication_service.detect_for_chunks(
+                node_id=owner_node_id,
+                candidate_chunks=chunks,
+                content_hash=extracted.raw_content_hash or "hash-v1",
+            )
+            if deduplication_policy == "reject" and dedup_result.has_any_duplicate:
+                raise InvariantViolationError(
+                    "Duplicate knowledge detected and deduplication_policy='reject': "
+                    f"exact={dedup_result.exact_matches}, "
+                    f"near={[m.existing_item_id for m in dedup_result.near_duplicate_matches]}, "
+                    f"overlap={[m.existing_item_id for m in dedup_result.overlap_matches]}"
+                )
+
+        # 6. Create KnowledgeItem and initial KnowledgeVersion (v1)
         scope = KnowledgeScope(
             owner_node_id=owner_node_id,
             confidentiality=metadata.confidentiality,
@@ -185,11 +230,13 @@ class DocumentIngestionService:
         if lvm_used and extracted.lvm_annotations:
             item.attach_lvm_interpretation("\n".join(extracted.lvm_annotations))
 
-        # 6. Persist in KnowledgeRepository (and optional DocumentStorage + VectorIndex)
+        # 7. Persist in KnowledgeRepository (and optional DocumentStorage + VectorIndex)
         storage_uri: str | None = None
         with self._uow:
             if self._document_storage is not None:
-                storage_key = f"{owner_node_id}/{document_id}@{v1_tag.tag}.{extracted.file_format.value.lower()}"
+                storage_key = (
+                    f"{owner_node_id}/{document_id}@{v1_tag.tag}.{extracted.file_format.value.lower()}"
+                )
                 storage_uri = self._document_storage.save_document(storage_key, raw_bytes)
 
             self._uow.knowledge.save(item)
@@ -209,6 +256,7 @@ class DocumentIngestionService:
             extracted_content=extracted,
             lvm_assisted=lvm_used,
             storage_uri=storage_uri,
+            duplicate_detection=dedup_result,
         )
 
 

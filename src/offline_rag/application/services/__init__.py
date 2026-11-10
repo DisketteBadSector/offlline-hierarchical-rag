@@ -14,8 +14,13 @@ from offline_rag.application.services.document_ingestion_service import (
     DocumentIngestionResult,
     DocumentIngestionService,
 )
+from offline_rag.application.services.knowledge_deduplication_service import (
+    DeduplicationPolicy,
+    KnowledgeDeduplicationService,
+)
 from offline_rag.domain.evaluation import JudgeRubric, JudgeScore, JudgeThreshold
 from offline_rag.domain.knowledge import (
+    DuplicateDetectionResult,
     KnowledgeChunk,
     KnowledgeItem,
 )
@@ -64,10 +69,12 @@ class KnowledgeApplicationService:
         uow: UnitOfWork,
         vector_index: VectorIndexPort | None = None,
         embedding_port: EmbeddingModelPort | None = None,
+        deduplication_service: KnowledgeDeduplicationService | None = None,
     ) -> None:
         self._uow = uow
         self._vector_index = vector_index
         self._embedding_port = embedding_port
+        self._deduplication_service = deduplication_service
 
     def register_knowledge_item(self, item: KnowledgeItem) -> KnowledgeItem:
         """Save a new KnowledgeItem and optionally index its active chunks."""
@@ -100,6 +107,30 @@ class KnowledgeApplicationService:
             self._index_active_chunks(item)
             self._uow.commit()
         return item
+
+    def check_duplicate_before_update(
+        self,
+        item_id: str,
+        content_hash: str,
+        candidate_chunks: tuple[KnowledgeChunk, ...],
+        deduplication_service: KnowledgeDeduplicationService | None = None,
+    ) -> DuplicateDetectionResult:
+        """Phase 5: run duplicate/overlap detection excluding the item being updated."""
+        item = self._uow.knowledge.get_by_id(item_id)
+        if item is None:
+            raise EntityNotFoundError(f"KnowledgeItem '{item_id}' not found.")
+        service = deduplication_service or self._deduplication_service
+        if service is None:
+            raise RuntimeError(
+                "KnowledgeDeduplicationService is not configured for "
+                "KnowledgeApplicationService.check_duplicate_before_update."
+            )
+        return service.detect_for_chunks(
+            node_id=item.scope.owner_node_id,
+            candidate_chunks=candidate_chunks,
+            content_hash=content_hash,
+            exclude_item_id=item_id,
+        )
 
     def _index_active_chunks(self, item: KnowledgeItem) -> None:
         if self._vector_index is None or self._embedding_port is None:
@@ -206,9 +237,11 @@ class TransferApplicationService:
 
 
 __all__ = [
+    "DeduplicationPolicy",
     "DocumentIngestionResult",
     "DocumentIngestionService",
     "HierarchyApplicationService",
     "KnowledgeApplicationService",
+    "KnowledgeDeduplicationService",
     "TransferApplicationService",
 ]

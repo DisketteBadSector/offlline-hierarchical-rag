@@ -8,6 +8,7 @@ from offline_rag.domain.knowledge import (
     DocumentFormat,
     KnowledgeChunk,
     KnowledgeItem,
+    KnowledgeVersion,
 )
 from offline_rag.domain.rag import (
     RAGContextPackage,
@@ -36,6 +37,12 @@ def _make_sample_metadata(node_str: str = "N-300") -> MetadataRecord:
         active_version_tag=v1,
         confidentiality="internal",
     )
+
+
+def _require_version(item: KnowledgeItem, tag: str) -> KnowledgeVersion:
+    v = item.get_version(tag)
+    assert v is not None, f"version '{tag}' not found on {item.item_id}"
+    return v
 
 
 def test_knowledge_item_versioning_preserves_history_and_switches_active_version() -> None:
@@ -88,8 +95,11 @@ def test_knowledge_item_versioning_preserves_history_and_switches_active_version
 
     # Verify history preservation and active pointer switch
     assert len(item.versions) == 2
-    assert item.get_version("v1") is not None
-    assert item.get_version("v1").is_active is False  # type: ignore[union-attr]
+
+    old_v1 = _require_version(item, "v1")
+    assert old_v1.is_active is False
+    assert old_v1.version_tag.tag == "v1"
+
     assert v2.is_active is True
     assert item.active_version == v2
     assert item.active_version.previous_version_tag == v1
